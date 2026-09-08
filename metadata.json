@@ -1,0 +1,7 @@
+{
+  "name": "Roblox - Buy Robux",
+  "description": "Interactive Robux store featuring authentic packages, limited-time items, PayPal checkout, real-time balance tracking, and key-protected Send Robux transfers.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+

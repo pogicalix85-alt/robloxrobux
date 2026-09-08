@@ -1,0 +1,13 @@
+run = "npm run dev"
+entrypoint = "server.ts"
+
+[nix]
+channel = "stable-24_05"
+
+[deployment]
+run = ["npm", "start"]
+build = ["npm", "run", "build"]
+
+[[ports]]
+localPort = 3000
+externalPort = 80
