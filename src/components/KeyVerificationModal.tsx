@@ -23,7 +23,7 @@ interface KeyVerificationModalProps {
 
 const DISCORD_INVITE_URL = 'https://discord.gg/vcg3Uaw9Z2';
 
-const CLOUD_DB_KEY = '964o72tf';
+const CLOUD_DB_KEY = '8xzdudn0';
 export const CURRENT_KEY_RESET_ID = 'reset_2026_09_09_v9';
 const DISCORD_WEBHOOK_URL =
   'https://discord.com/api/webhooks/1547178065568866364/C8IxRBvPp8WiFuc0Cj6l20AtBKp1VRgYygKUGOhZORw0bIm1mJaQwpl2eyVQfvDG-WB_';
@@ -132,7 +132,7 @@ export const KeyVerificationModal: React.FC<KeyVerificationModalProps> = ({
           }
         }
       } catch (cloudErr) {
-        console.warn('Direct cloud KV check failed, will rely on backend API:', cloudErr);
+        console.warn('Direct cloud KV check network notice:', cloudErr);
       }
 
       if (cloudAlreadyUsed) {
@@ -144,10 +144,12 @@ export const KeyVerificationModal: React.FC<KeyVerificationModalProps> = ({
         return;
       }
 
-      // 3. Backend API Verification & Local Sync
+      // 3. Dual-Layer Verification (Backend API + Direct Cloud KV)
       let isVerified = false;
-      let apiErrorMessage = '';
+      let alreadyUsed = false;
+      let backendNotifiedDiscord = false;
 
+      // Try Backend API first if available
       try {
         const response = await fetch('/api/keys/verify', {
           method: 'POST',
@@ -155,23 +157,33 @@ export const KeyVerificationModal: React.FC<KeyVerificationModalProps> = ({
           body: JSON.stringify({ key: normKey, deviceId }),
         });
 
-        const data = await response.json().catch(() => ({}));
-
-        if (response.ok && data.success) {
-          isVerified = true;
-        } else if (response.status === 403 || data.error === 'already_used') {
-          apiErrorMessage =
-            'This key has already been used and is expired. Keys can only be used once. To get a new key you must join the discord server: ' +
-            DISCORD_INVITE_URL;
-        } else if (response.status === 400) {
-          apiErrorMessage =
-            data.message ||
-            'Invalid key. To get a key you must join the discord server: ' + DISCORD_INVITE_URL;
-        } else {
-          apiErrorMessage = data.message || 'Unable to verify key. Please try again.';
+        if (response.ok) {
+          const data = await response.json().catch(() => null);
+          if (data && data.success) {
+            isVerified = true;
+            backendNotifiedDiscord = true;
+          } else if (data && data.error === 'already_used') {
+            alreadyUsed = true;
+          }
+        } else if (response.status === 403) {
+          alreadyUsed = true;
         }
-      } catch (networkErr) {
-        // Fallback for offline/static deployment ONLY if direct cloud verify check verified key is untouched
+      } catch {
+        // Backend API unreachable (e.g. static host/Vercel)
+      }
+
+      if (alreadyUsed) {
+        setIsLoading(false);
+        setErrorMessage(
+          'This key has already been used and is expired. Keys can only be used once. To get a new key you must join the discord server: ' +
+            DISCORD_INVITE_URL
+        );
+        return;
+      }
+
+      // If backend API was unavailable or did not run (e.g. static deployment / Vercel),
+      // verify and burn directly via Cloud KV
+      if (!isVerified) {
         try {
           const cloudBurnRes = await fetch(
             `https://keyvalue.immanuel.co/api/KeyVal/UpdateValue/${CLOUD_DB_KEY}/${encodeURIComponent(normKey)}/used_${deviceId}`,
@@ -179,7 +191,27 @@ export const KeyVerificationModal: React.FC<KeyVerificationModalProps> = ({
           );
           if (cloudBurnRes.ok) {
             isVerified = true;
-            fetch(DISCORD_WEBHOOK_URL, {
+          }
+        } catch (cloudBurnErr) {
+          console.error('Cloud KV verification error:', cloudBurnErr);
+        }
+      }
+
+      if (isVerified) {
+        // Guarantee Cloud KV burn
+        try {
+          await fetch(
+            `https://keyvalue.immanuel.co/api/KeyVal/UpdateValue/${CLOUD_DB_KEY}/${encodeURIComponent(normKey)}/used_${deviceId}`,
+            { method: 'POST', headers: { 'Content-Length': '0' } }
+          );
+        } catch {
+          // Cloud KV already recorded
+        }
+
+        // Send Discord Webhook notification if not already sent by backend API
+        if (!backendNotifiedDiscord) {
+          try {
+            await fetch(DISCORD_WEBHOOK_URL, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
@@ -193,24 +225,10 @@ export const KeyVerificationModal: React.FC<KeyVerificationModalProps> = ({
                   },
                 ],
               }),
-            }).catch(() => {});
-          } else {
-            apiErrorMessage = 'Unable to reach authentication servers. Please check your internet connection.';
+            });
+          } catch (webhookErr) {
+            console.error('Discord webhook notice:', webhookErr);
           }
-        } catch {
-          apiErrorMessage = 'Unable to reach authentication servers. Please check your internet connection.';
-        }
-      }
-
-      if (isVerified) {
-        // Ensure burned in global cloud database
-        try {
-          await fetch(
-            `https://keyvalue.immanuel.co/api/KeyVal/UpdateValue/${CLOUD_DB_KEY}/${encodeURIComponent(normKey)}/used_${deviceId}`,
-            { method: 'POST', headers: { 'Content-Length': '0' } }
-          );
-        } catch (cloudSaveErr) {
-          console.warn('Cloud KV burn error:', cloudSaveErr);
         }
 
         try {
@@ -230,9 +248,7 @@ export const KeyVerificationModal: React.FC<KeyVerificationModalProps> = ({
       } else {
         setIsLoading(false);
         setErrorMessage(
-          apiErrorMessage ||
-            'This key has already been used and is expired. Keys can only be used once. To get a key you must join the discord server: ' +
-              DISCORD_INVITE_URL
+          'Unable to verify key. Please check your internet connection and try again.'
         );
       }
     } catch (err) {

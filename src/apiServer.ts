@@ -36,7 +36,7 @@ function saveRedeemedKeys(data: Record<string, { deviceId: string; redeemedAt: s
   }
 }
 
-const CLOUD_DB_KEY = '964o72tf';
+const CLOUD_DB_KEY = '8xzdudn0';
 const DISCORD_WEBHOOK_URL =
   'https://discord.com/api/webhooks/1547178065568866364/C8IxRBvPp8WiFuc0Cj6l20AtBKp1VRgYygKUGOhZORw0bIm1mJaQwpl2eyVQfvDG-WB_';
 
