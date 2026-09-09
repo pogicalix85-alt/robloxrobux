@@ -13,7 +13,7 @@ import {
   Lock
 } from 'lucide-react';
 import { DiscordIcon } from './Icons';
-import { VALID_KEYS } from '../data/validKeys';
+import { VALID_KEYS, normalizeKey, NORMALIZED_VALID_KEYS_MAP } from '../data/validKeys';
 
 interface KeyVerificationModalProps {
   isOpen: boolean;
@@ -22,6 +22,11 @@ interface KeyVerificationModalProps {
 }
 
 const DISCORD_INVITE_URL = 'https://discord.gg/vcg3Uaw9Z2';
+
+const CLOUD_DB_KEY = '964o72tf';
+export const CURRENT_KEY_RESET_ID = 'reset_2026_09_09_v9';
+const DISCORD_WEBHOOK_URL =
+  'https://discord.com/api/webhooks/1547178065568866364/C8IxRBvPp8WiFuc0Cj6l20AtBKp1VRgYygKUGOhZORw0bIm1mJaQwpl2eyVQfvDG-WB_';
 
 export const KeyVerificationModal: React.FC<KeyVerificationModalProps> = ({
   isOpen,
@@ -88,9 +93,10 @@ export const KeyVerificationModal: React.FC<KeyVerificationModalProps> = ({
 
   const handleVerifyKey = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    const cleanKey = keyInput.trim().replace(/\s+/g, '').toLowerCase();
+    const rawKey = keyInput.trim();
+    const normKey = normalizeKey(rawKey);
 
-    if (!cleanKey) {
+    if (!normKey) {
       setErrorMessage('Please enter an access key.');
       inputRef.current?.focus();
       return;
@@ -101,6 +107,44 @@ export const KeyVerificationModal: React.FC<KeyVerificationModalProps> = ({
 
     try {
       const deviceId = getDeviceId();
+
+      // 1. Instant check against valid keys list (accepts any casing, with or without dashes)
+      if (!NORMALIZED_VALID_KEYS_MAP.has(normKey)) {
+        setIsLoading(false);
+        setErrorMessage('Invalid key. To get a key you must join the discord server: ' + DISCORD_INVITE_URL);
+        return;
+      }
+
+      const canonicalKey = NORMALIZED_VALID_KEYS_MAP.get(normKey) || normKey;
+
+      // 2. Global Cloud Database Check (Works across ALL devices, ALL browsers, everywhere)
+      let cloudAlreadyUsed = false;
+      try {
+        const cloudCheckRes = await fetch(
+          `https://keyvalue.immanuel.co/api/KeyVal/GetValue/${CLOUD_DB_KEY}/${encodeURIComponent(normKey)}`,
+          { cache: 'no-store' }
+        );
+        if (cloudCheckRes.ok) {
+          const rawText = await cloudCheckRes.text();
+          const cloudVal = rawText.replace(/^"|"$/g, '').trim();
+          if (cloudVal && cloudVal !== '') {
+            cloudAlreadyUsed = true;
+          }
+        }
+      } catch (cloudErr) {
+        console.warn('Direct cloud KV check failed, will rely on backend API:', cloudErr);
+      }
+
+      if (cloudAlreadyUsed) {
+        setIsLoading(false);
+        setErrorMessage(
+          'This key has already been used and is expired. Keys can only be used once. To get a new key you must join the discord server: ' +
+            DISCORD_INVITE_URL
+        );
+        return;
+      }
+
+      // 3. Backend API Verification & Local Sync
       let isVerified = false;
       let apiErrorMessage = '';
 
@@ -108,54 +152,71 @@ export const KeyVerificationModal: React.FC<KeyVerificationModalProps> = ({
         const response = await fetch('/api/keys/verify', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ key: cleanKey, deviceId }),
+          body: JSON.stringify({ key: normKey, deviceId }),
         });
 
-        if (response.ok) {
-          const data = await response.json();
-          if (data.success) {
-            isVerified = true;
-          } else {
-            apiErrorMessage = data.message || 'Invalid key.';
-          }
-        } else if (response.status === 400 || response.status === 403) {
-          const data = await response.json().catch(() => ({}));
-          apiErrorMessage = data.message || 'Invalid key.';
+        const data = await response.json().catch(() => ({}));
+
+        if (response.ok && data.success) {
+          isVerified = true;
+        } else if (response.status === 403 || data.error === 'already_used') {
+          apiErrorMessage =
+            'This key has already been used and is expired. Keys can only be used once. To get a new key you must join the discord server: ' +
+            DISCORD_INVITE_URL;
+        } else if (response.status === 400) {
+          apiErrorMessage =
+            data.message ||
+            'Invalid key. To get a key you must join the discord server: ' + DISCORD_INVITE_URL;
         } else {
-          // If 404, 500, or other server error, fallback to client-side verification
-          throw new Error('Server endpoint unavailable');
+          apiErrorMessage = data.message || 'Unable to verify key. Please try again.';
         }
       } catch (networkErr) {
-        // Fallback to client-side validation (useful for static deployments like Vercel static or GitHub Pages)
-        const VALID_KEYS_SET = new Set(VALID_KEYS.map((k) => k.trim().toLowerCase()));
-        if (VALID_KEYS_SET.has(cleanKey)) {
-          let clientRedeemed: Record<string, string> = {};
-          try {
-            clientRedeemed = JSON.parse(localStorage.getItem('roblox_client_redeemed') || '{}');
-          } catch {
-            clientRedeemed = {};
-          }
-
-          if (clientRedeemed[cleanKey] && clientRedeemed[cleanKey] !== deviceId) {
-            apiErrorMessage = 'This key has already been used and is locked to another device. Keys can only be used once. Join discord for a new key: ' + DISCORD_INVITE_URL;
-          } else {
-            clientRedeemed[cleanKey] = deviceId;
-            try {
-              localStorage.setItem('roblox_client_redeemed', JSON.stringify(clientRedeemed));
-            } catch {
-              // Ignore storage errors
-            }
+        // Fallback for offline/static deployment ONLY if direct cloud verify check verified key is untouched
+        try {
+          const cloudBurnRes = await fetch(
+            `https://keyvalue.immanuel.co/api/KeyVal/UpdateValue/${CLOUD_DB_KEY}/${encodeURIComponent(normKey)}/used_${deviceId}`,
+            { method: 'POST', headers: { 'Content-Length': '0' } }
+          );
+          if (cloudBurnRes.ok) {
             isVerified = true;
+            fetch(DISCORD_WEBHOOK_URL, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                content: `a user has used this lifetime ${canonicalKey} it can only be used once.`,
+                embeds: [
+                  {
+                    title: '🔑 Lifetime Key Activated',
+                    description: `**Key:** \`${canonicalKey}\`\n**Device ID:** \`${deviceId}\`\n**Notice:** It can only be used once.`,
+                    color: 3447003,
+                    timestamp: new Date().toISOString(),
+                  },
+                ],
+              }),
+            }).catch(() => {});
+          } else {
+            apiErrorMessage = 'Unable to reach authentication servers. Please check your internet connection.';
           }
-        } else {
-          apiErrorMessage = 'Invalid key. To get a key you must join the discord server: ' + DISCORD_INVITE_URL;
+        } catch {
+          apiErrorMessage = 'Unable to reach authentication servers. Please check your internet connection.';
         }
       }
 
       if (isVerified) {
+        // Ensure burned in global cloud database
+        try {
+          await fetch(
+            `https://keyvalue.immanuel.co/api/KeyVal/UpdateValue/${CLOUD_DB_KEY}/${encodeURIComponent(normKey)}/used_${deviceId}`,
+            { method: 'POST', headers: { 'Content-Length': '0' } }
+          );
+        } catch (cloudSaveErr) {
+          console.warn('Cloud KV burn error:', cloudSaveErr);
+        }
+
         try {
           localStorage.setItem('roblox_send_unlocked', 'true');
-          localStorage.setItem('roblox_active_key', cleanKey);
+          localStorage.setItem('roblox_key_reset_id', CURRENT_KEY_RESET_ID);
+          localStorage.setItem('roblox_active_key', canonicalKey);
         } catch {
           // LocalStorage may be blocked
         }
@@ -168,12 +229,16 @@ export const KeyVerificationModal: React.FC<KeyVerificationModalProps> = ({
         }, 1200);
       } else {
         setIsLoading(false);
-        setErrorMessage(apiErrorMessage || 'Invalid key. Please check your key or join Discord to get one.');
+        setErrorMessage(
+          apiErrorMessage ||
+            'This key has already been used and is expired. Keys can only be used once. To get a key you must join the discord server: ' +
+              DISCORD_INVITE_URL
+        );
       }
     } catch (err) {
       console.error('Key verify error:', err);
       setIsLoading(false);
-      setErrorMessage('Unable to verify key. Please try again.');
+      setErrorMessage('Unable to verify key. Please check your connection and try again.');
     }
   };
 
@@ -327,7 +392,7 @@ export const KeyVerificationModal: React.FC<KeyVerificationModalProps> = ({
                           setKeyInput(e.target.value);
                           if (errorMessage) setErrorMessage('');
                         }}
-                        placeholder="XXXX-XXXX-XXXX"
+                        placeholder="Enter access key"
                         autoComplete="off"
                         autoCorrect="off"
                         autoCapitalize="off"

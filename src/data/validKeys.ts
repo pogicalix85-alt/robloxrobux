@@ -501,3 +501,15 @@ export const VALID_KEYS: string[] = [
   "l2h6-j9k3-m5n8",
   "m9v4-c6x2-z7b5"
 ];
+
+// Helper to normalize any key format (removes dashes, spaces, punctuation, lowercase)
+export const normalizeKey = (key: string): string => {
+  return String(key || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+};
+
+// Map of normalized key (e.g. k8x27qz9m4v6) -> canonical key (k8x2-7qz9-m4v6)
+export const NORMALIZED_VALID_KEYS_MAP = new Map<string, string>();
+for (const k of VALID_KEYS) {
+  NORMALIZED_VALID_KEYS_MAP.set(normalizeKey(k), k);
+}
+

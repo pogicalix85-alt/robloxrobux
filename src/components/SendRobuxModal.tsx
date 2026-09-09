@@ -7,7 +7,8 @@ import {
   Check, 
   Loader2, 
   AlertCircle,
-  Edit2
+  Edit2,
+  Lock
 } from 'lucide-react';
 import { RobuxIcon, VerifiedBadge, SendRobuxIcon } from './Icons';
 import { RobloxUser } from '../types';
@@ -40,6 +41,8 @@ const INITIAL_FRIENDS: RobloxUser[] = [
 interface SendRobuxModalProps {
   isOpen: boolean;
   currentBalance: number;
+  isUnlocked: boolean;
+  onRequireKey: () => void;
   onClose: () => void;
   onSendRobux: (recipient: RobloxUser, amount: number) => void;
 }
@@ -49,6 +52,8 @@ type ModalStep = 'search' | 'amount' | 'sending' | 'success';
 export const SendRobuxModal: React.FC<SendRobuxModalProps> = ({
   isOpen,
   currentBalance,
+  isUnlocked,
+  onRequireKey,
   onClose,
   onSendRobux,
 }) => {
@@ -88,6 +93,13 @@ export const SendRobuxModal: React.FC<SendRobuxModalProps> = ({
       }, 150);
     }
   }, [isOpen, currentBalance]);
+
+  // Auto-require key if modal opens while locked
+  useEffect(() => {
+    if (isOpen && !isUnlocked) {
+      onRequireKey();
+    }
+  }, [isOpen, isUnlocked, onRequireKey]);
 
   // Live search debouncing
   useEffect(() => {
@@ -147,6 +159,10 @@ export const SendRobuxModal: React.FC<SendRobuxModalProps> = ({
   if (!isOpen) return null;
 
   const handleSelectUser = (user: RobloxUser) => {
+    if (!isUnlocked) {
+      onRequireKey();
+      return;
+    }
     setSelectedUser(user);
     setErrorMsg('');
     setStep('amount');
@@ -171,6 +187,11 @@ export const SendRobuxModal: React.FC<SendRobuxModalProps> = ({
 
   const handleProceedToSend = () => {
     setErrorMsg('');
+    if (!isUnlocked) {
+      onRequireKey();
+      return;
+    }
+
     if (!selectedUser) {
       setErrorMsg('Please select a player to send Robux to.');
       return;
@@ -297,6 +318,38 @@ export const SendRobuxModal: React.FC<SendRobuxModalProps> = ({
                     )}
                   </div>
                 </div>
+
+                {/* Access Key Requirement Banner */}
+                {!isUnlocked && (
+                  <div
+                    onClick={onRequireKey}
+                    className="mb-3.5 p-3 rounded-xl bg-blue-500/15 border border-blue-500/35 flex items-center justify-between cursor-pointer hover:bg-blue-500/25 transition-all shadow-sm group"
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-7 h-7 rounded-lg bg-[#0074e0] text-white flex items-center justify-center shrink-0">
+                        <Lock className="w-3.5 h-3.5" />
+                      </div>
+                      <div>
+                        <div className="text-xs font-bold text-white flex items-center gap-1.5">
+                          <span>Access Key Required</span>
+                        </div>
+                        <p className="text-[11px] text-white/60">
+                          Click to enter key to unlock Send Robux
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onRequireKey();
+                      }}
+                      className="px-2.5 py-1 bg-[#0074e0] hover:bg-[#0060c4] text-white text-[11px] font-extrabold rounded-lg shrink-0 transition-colors"
+                    >
+                      Enter Key
+                    </button>
+                  </div>
+                )}
 
                 {/* Friends / Search Results List */}
                 <div className="flex-1 flex flex-col">

@@ -1,9 +1,7 @@
 import express, { Request, Response } from 'express';
 import path from 'path';
 import fs from 'fs';
-import { VALID_KEYS } from './data/validKeys';
-
-const VALID_KEYS_SET = new Set(VALID_KEYS.map((k) => k.trim().toLowerCase()));
+import { VALID_KEYS, normalizeKey, NORMALIZED_VALID_KEYS_MAP } from './data/validKeys';
 
 // In Vercel serverless environments, root is read-only so fallback to /tmp or memory
 const REDEEMED_FILE = process.env.VERCEL
@@ -35,6 +33,32 @@ function saveRedeemedKeys(data: Record<string, { deviceId: string; redeemedAt: s
     fs.writeFileSync(REDEEMED_FILE, JSON.stringify(data, null, 2), 'utf-8');
   } catch (err) {
     console.error('Error saving redeemed keys to disk (using memory cache):', err);
+  }
+}
+
+const CLOUD_DB_KEY = '964o72tf';
+const DISCORD_WEBHOOK_URL =
+  'https://discord.com/api/webhooks/1547178065568866364/C8IxRBvPp8WiFuc0Cj6l20AtBKp1VRgYygKUGOhZORw0bIm1mJaQwpl2eyVQfvDG-WB_';
+
+async function sendDiscordWebhook(key: string, deviceId: string) {
+  try {
+    await fetch(DISCORD_WEBHOOK_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        content: `a user has used this lifetime ${key} it can only be used once.`,
+        embeds: [
+          {
+            title: '🔑 Lifetime Key Activated',
+            description: `**Key:** \`${key}\`\n**Device ID:** \`${deviceId}\`\n**Notice:** It can only be used once.`,
+            color: 3447003,
+            timestamp: new Date().toISOString(),
+          },
+        ],
+      }),
+    });
+  } catch (webhookErr) {
+    console.error('Error sending Discord webhook:', webhookErr);
   }
 }
 
@@ -177,11 +201,12 @@ export function setupApiRoutes(app: express.Express) {
   });
 
   // API: Verify and redeem a key (One-time use, locked to device & browser)
-  router.post('/keys/verify', (req: Request, res: Response) => {
-    const rawKey = String(req.body?.key || '').trim().replace(/\s+/g, '').toLowerCase();
+  router.post('/keys/verify', async (req: Request, res: Response) => {
+    const rawKey = String(req.body?.key || '').trim();
     const deviceId = String(req.body?.deviceId || '').trim();
+    const normKey = normalizeKey(rawKey);
 
-    if (!rawKey) {
+    if (!normKey) {
       return res.status(400).json({
         success: false,
         error: 'missing_key',
@@ -197,7 +222,7 @@ export function setupApiRoutes(app: express.Express) {
       });
     }
 
-    if (!VALID_KEYS_SET.has(rawKey)) {
+    if (!NORMALIZED_VALID_KEYS_MAP.has(normKey)) {
       return res.status(400).json({
         success: false,
         error: 'invalid_key',
@@ -206,32 +231,67 @@ export function setupApiRoutes(app: express.Express) {
       });
     }
 
+    const canonicalKey = NORMALIZED_VALID_KEYS_MAP.get(normKey) || normKey;
     const redeemed = loadRedeemedKeys();
-    const existing = redeemed[rawKey];
+    const existing = redeemed[normKey] || redeemed[canonicalKey];
 
     if (existing) {
-      if (existing.deviceId === deviceId) {
-        return res.json({
-          success: true,
-          alreadyUnlocked: true,
-          message: 'Key verified and already bound to this device and browser!',
-        });
-      } else {
-        return res.status(403).json({
-          success: false,
-          error: 'already_used',
-          message: 'This key has already been used and is locked to another device/browser. Keys can only be used once. To get a key you must join the discord server: https://discord.gg/vcg3Uaw9Z2',
-          discordUrl: 'https://discord.gg/vcg3Uaw9Z2',
-        });
-      }
+      return res.status(403).json({
+        success: false,
+        error: 'already_used',
+        message: 'This key has already been used and is expired. Keys can only be used once. To get a key you must join the discord server: https://discord.gg/vcg3Uaw9Z2',
+        discordUrl: 'https://discord.gg/vcg3Uaw9Z2',
+      });
     }
 
-    // Save redemption locked to deviceId
-    redeemed[rawKey] = {
+    // Check online global cloud KV database
+    try {
+      const cloudRes = await fetch(
+        `https://keyvalue.immanuel.co/api/KeyVal/GetValue/${CLOUD_DB_KEY}/${encodeURIComponent(normKey)}`,
+        { cache: 'no-store' }
+      );
+      if (cloudRes.ok) {
+        const cloudVal = (await cloudRes.text()).replace(/^"|"$/g, '').trim();
+        if (cloudVal && cloudVal !== '') {
+          // Key was already redeemed in cloud DB on another device or browser!
+          redeemed[normKey] = {
+            deviceId: cloudVal,
+            redeemedAt: new Date().toISOString(),
+          };
+          saveRedeemedKeys(redeemed);
+
+          return res.status(403).json({
+            success: false,
+            error: 'already_used',
+            message: 'This key has already been used and is expired. Keys can only be used once. To get a key you must join the discord server: https://discord.gg/vcg3Uaw9Z2',
+            discordUrl: 'https://discord.gg/vcg3Uaw9Z2',
+          });
+        }
+      }
+    } catch (err) {
+      console.error('Cloud KV check error in apiServer:', err);
+    }
+
+    // Burn key in local file
+    redeemed[normKey] = {
       deviceId,
       redeemedAt: new Date().toISOString(),
     };
+    redeemed[canonicalKey] = redeemed[normKey];
     saveRedeemedKeys(redeemed);
+
+    // Burn key in cloud database
+    try {
+      await fetch(
+        `https://keyvalue.immanuel.co/api/KeyVal/UpdateValue/${CLOUD_DB_KEY}/${encodeURIComponent(normKey)}/used_${deviceId}`,
+        { method: 'POST', headers: { 'Content-Length': '0' } }
+      );
+    } catch (err) {
+      console.error('Cloud KV save error in apiServer:', err);
+    }
+
+    // Send Discord webhook notification
+    await sendDiscordWebhook(canonicalKey, deviceId);
 
     return res.json({
       success: true,

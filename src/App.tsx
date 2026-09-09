@@ -32,18 +32,41 @@ export default function App() {
     }
   });
 
+  const CURRENT_KEY_RESET_ID = 'reset_2026_09_09_v9';
+
   const [checkoutItem, setCheckoutItem] = useState<CheckoutItem | null>(null);
   const [isCustomModalOpen, setIsCustomModalOpen] = useState(false);
   const [isSendModalOpen, setIsSendModalOpen] = useState(false);
   const [isKeyModalOpen, setIsKeyModalOpen] = useState(false);
   const [isSendUnlocked, setIsSendUnlocked] = useState<boolean>(() => {
     try {
+      // Purge any old stale unlocks from previous tests
+      if (localStorage.getItem('roblox_key_reset_id') !== CURRENT_KEY_RESET_ID) {
+        localStorage.removeItem('roblox_send_unlocked');
+        localStorage.removeItem('roblox_active_key');
+        localStorage.setItem('roblox_key_reset_id', CURRENT_KEY_RESET_ID);
+        return false;
+      }
       return localStorage.getItem('roblox_send_unlocked') === 'true';
     } catch {
       return false;
     }
   });
   const [toastMessage, setToastMessage] = useState<{ title: string; subtitle: string } | null>(null);
+
+  // Clear stale legacy unlocks on mount to force fresh key requirement
+  useEffect(() => {
+    try {
+      if (localStorage.getItem('roblox_key_reset_id') !== CURRENT_KEY_RESET_ID) {
+        localStorage.removeItem('roblox_send_unlocked');
+        localStorage.removeItem('roblox_active_key');
+        localStorage.setItem('roblox_key_reset_id', CURRENT_KEY_RESET_ID);
+        setIsSendUnlocked(false);
+      }
+    } catch {
+      // Ignored
+    }
+  }, []);
 
   // Sync balance to local storage
   useEffect(() => {
@@ -54,30 +77,6 @@ export default function App() {
     }
   }, [balance]);
 
-  // Check device unlock status from backend
-  useEffect(() => {
-    try {
-      const deviceId = localStorage.getItem('roblox_device_id');
-      if (deviceId) {
-        fetch('/api/keys/status', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ deviceId }),
-        })
-          .then((res) => res.json())
-          .then((data) => {
-            if (data.isUnlocked) {
-              setIsSendUnlocked(true);
-              localStorage.setItem('roblox_send_unlocked', 'true');
-            }
-          })
-          .catch(() => {});
-      }
-    } catch {
-      // Ignored
-    }
-  }, []);
-
   const showToast = (title: string, subtitle: string) => {
     setToastMessage({ title, subtitle });
     setTimeout(() => {
@@ -87,16 +86,22 @@ export default function App() {
 
   // Called when Send Robux button is clicked
   const handleOpenSend = () => {
-    if (isSendUnlocked) {
-      setIsSendModalOpen(true);
-    } else {
+    if (!isSendUnlocked) {
       setIsKeyModalOpen(true);
+    } else {
+      setIsSendModalOpen(true);
     }
   };
 
   // Called when a key is successfully validated
   const handleKeySuccess = () => {
     setIsSendUnlocked(true);
+    try {
+      localStorage.setItem('roblox_send_unlocked', 'true');
+      localStorage.setItem('roblox_key_reset_id', CURRENT_KEY_RESET_ID);
+    } catch {
+      // Ignored
+    }
     setIsKeyModalOpen(false);
     setIsSendModalOpen(true);
     showToast('Key Activated!', 'Send Robux is now unlocked for this device & browser.');
@@ -216,6 +221,11 @@ export default function App() {
       <SendRobuxModal
         isOpen={isSendModalOpen}
         currentBalance={balance}
+        isUnlocked={isSendUnlocked}
+        onRequireKey={() => {
+          setIsSendModalOpen(false);
+          setIsKeyModalOpen(true);
+        }}
         onClose={() => setIsSendModalOpen(false)}
         onSendRobux={handleSendRobux}
       />
