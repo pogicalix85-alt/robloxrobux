@@ -3,39 +3,27 @@ export type Currency = 'PHP' | 'USD';
 export interface RobuxPackage {
   id: string;
   robuxAmount: number;
+  originalRobux?: number;
   bonusRobux?: number;
-  originalRobux?: number;
-  pricePHP: number;
-  priceUSD: number;
-  formattedPHP: string;
-  formattedUSD: string;
-  isForYou?: boolean;
-  tag?: string;
+  bonusText?: string;
+  price: number;
+  formattedPrice: string;
+  isPopular?: boolean;
   highlightButton?: boolean;
-}
-
-export interface LimitedItem {
-  id: string;
-  name: string;
-  creator: string;
-  isVerified: boolean;
-  daysLeft: number;
-  robuxAmount: number;
-  originalRobux?: number;
-  pricePHP: number;
-  priceUSD: number;
-  formattedPHP: string;
-  formattedUSD: string;
-  image: string;
 }
 
 export interface SubscriptionPlan {
   id: string;
   title: string;
-  pricePHP: number;
-  priceUSD: number;
-  perks: string[];
+  price: number;
+  formattedPrice: string;
+  originalPrice?: string;
+  perks: {
+    icon: 'tag' | 'gamepad' | 'send' | 'wand' | 'hexagon' | 'robux' | 'piggy';
+    text: string;
+  }[];
   robuxMonthly?: number;
+  totalValue?: string;
 }
 
 export interface RobloxUser {

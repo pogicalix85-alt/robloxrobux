@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
+import React, { useRef } from 'react';
 import { SUBSCRIPTIONS } from '../data/robuxData';
-import { Tag, Gamepad2, Upload, ChevronRight } from 'lucide-react';
-import { RobuxIcon } from './Icons';
+import { Tag, Gamepad2, Sparkles, ChevronRight, PiggyBank } from 'lucide-react';
+import { RobuxIcon, RobloxPlusHexagonIcon } from './Icons';
 
 interface RobloxPlusCardsProps {
   onSelectSubscription: (sub: {
@@ -15,78 +15,97 @@ interface RobloxPlusCardsProps {
 export const RobloxPlusCards: React.FC<RobloxPlusCardsProps> = ({
   onSelectSubscription,
 }) => {
-  const [activeSlide, setActiveSlide] = useState(0);
+  const scrollRef = useRef<HTMLDivElement>(null);
 
-  const getPerkIcon = (index: number) => {
-    switch (index) {
-      case 0:
-        return <Tag className="w-4 h-4 text-white/80 shrink-0" />;
-      case 1:
-        return <Gamepad2 className="w-4 h-4 text-white/80 shrink-0" />;
-      case 2:
-        return <Upload className="w-4 h-4 text-white/80 shrink-0" />;
+  const handleScrollRight = () => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollBy({ left: 260, behavior: 'smooth' });
+    }
+  };
+
+  const renderIcon = (iconType: string) => {
+    switch (iconType) {
+      case 'tag':
+        return <Tag className="w-4 h-4 text-white/90 shrink-0" />;
+      case 'gamepad':
+        return <Gamepad2 className="w-4 h-4 text-white/90 shrink-0" />;
+      case 'send':
+        return <RobloxPlusHexagonIcon className="w-4 h-4 text-white/90 shrink-0" />;
+      case 'wand':
+        return <Sparkles className="w-4 h-4 text-white/90 shrink-0" />;
+      case 'hexagon':
+        return <RobloxPlusHexagonIcon className="w-4 h-4 text-white/90 shrink-0" />;
+      case 'robux':
+        return <RobuxIcon className="w-4 h-4 text-white/90 shrink-0" />;
+      case 'piggy':
+        return <PiggyBank className="w-4 h-4 text-white/90 shrink-0" />;
       default:
-        return <RobuxIcon className="w-4 h-4 text-white/80 shrink-0" />;
+        return <RobloxPlusHexagonIcon className="w-4 h-4 text-white/90 shrink-0" />;
     }
   };
 
   return (
-    <section className="px-4 mb-8">
-      {/* Section Header */}
+    <section className="px-4 mb-9">
+      {/* Section Header matching Screenshot 2 */}
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
-          <div className="w-5 h-5 rounded-md bg-white/10 flex items-center justify-center font-black text-xs text-white">
-            P
-          </div>
-          <h2 className="text-lg sm:text-xl font-extrabold text-white tracking-tight">
+          <RobloxPlusHexagonIcon className="w-6 h-6 text-white" />
+          <h2 className="text-lg sm:text-xl font-bold text-white tracking-tight">
             New on Roblox
           </h2>
         </div>
         <button
           type="button"
-          className="text-xs sm:text-sm font-semibold text-white/70 hover:text-white flex items-center gap-0.5 transition-colors"
+          className="text-xs sm:text-sm font-semibold text-white/80 hover:text-white underline transition-colors cursor-pointer"
         >
-          <span>Learn more</span>
-          <ChevronRight className="w-4 h-4" />
+          Learn more
         </button>
       </div>
 
-      {/* Horizontal Cards */}
-      <div className="flex gap-4 overflow-x-auto pb-2 scrollbar-none snap-x">
-        {SUBSCRIPTIONS.map((sub) => {
-          const price = `$${sub.priceUSD}`;
-          const priceVal = sub.priceUSD;
-
-          return (
+      {/* Cards Container with Right Scroll Arrow matching Screenshot 2 */}
+      <div className="relative group">
+        <div 
+          ref={scrollRef}
+          className="flex gap-3 overflow-x-auto pb-2 scrollbar-none snap-x"
+        >
+          {SUBSCRIPTIONS.map((sub) => (
             <div
               key={sub.id}
               id={`subscription-card-${sub.id}`}
-              className="snap-start shrink-0 w-[88%] sm:w-[320px] bg-[#181a20] rounded-2xl border border-white/[0.08] p-5 flex flex-col justify-between"
+              className="snap-start shrink-0 w-[220px] sm:w-[235px] bg-[#14151b] rounded-2xl p-4 sm:p-5 flex flex-col justify-between border border-transparent hover:border-white/[0.04] transition-all"
             >
               <div>
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-base sm:text-lg font-bold text-white">
+                {/* Header: Title + Price matching Screenshot 2 */}
+                <div className="flex items-baseline justify-between gap-1 mb-4">
+                  <h3 className="text-sm sm:text-base font-bold text-white tracking-tight leading-snug">
                     {sub.title}
                   </h3>
-                  <span className="text-sm sm:text-base font-extrabold text-white">
-                    {price}
-                  </span>
+                  <div className="flex items-baseline gap-1 shrink-0">
+                    {sub.originalPrice && (
+                      <span className="text-[11px] text-[#717684] line-through font-semibold">
+                        {sub.originalPrice}
+                      </span>
+                    )}
+                    <span className="text-sm sm:text-base font-black text-white">
+                      {sub.formattedPrice}
+                    </span>
+                  </div>
                 </div>
 
-                {/* Perks list */}
+                {/* Perks list matching Screenshot 2 */}
                 <div className="space-y-3 mb-6">
                   {sub.perks.map((perk, pIdx) => (
-                    <div key={pIdx} className="flex items-start gap-3">
-                      <div className="mt-0.5">{getPerkIcon(pIdx)}</div>
-                      <span className="text-xs sm:text-sm text-white/80 leading-snug">
-                        {perk}
+                    <div key={pIdx} className="flex items-start gap-2.5">
+                      <div className="mt-0.5">{renderIcon(perk.icon)}</div>
+                      <span className="text-xs sm:text-[13px] text-white/80 leading-snug">
+                        {perk.text}
                       </span>
                     </div>
                   ))}
                 </div>
               </div>
 
-              {/* Subscribe button */}
+              {/* Monthly Subscription button */}
               <button
                 id={`sub-btn-${sub.id}`}
                 type="button"
@@ -94,31 +113,27 @@ export const RobloxPlusCards: React.FC<RobloxPlusCardsProps> = ({
                   onSelectSubscription({
                     title: `${sub.title} (Monthly)`,
                     robux: sub.robuxMonthly || 0,
-                    price: priceVal,
-                    formattedPrice: `${price}/month`,
+                    price: sub.price,
+                    formattedPrice: `${sub.formattedPrice}/month`,
                   })
                 }
-                className="w-full bg-[#292d3a] hover:bg-[#343a4a] text-white font-bold text-sm py-2.5 rounded-xl border border-white/10 transition-colors text-center active:scale-[0.98]"
+                className="w-full bg-[#20222a] hover:bg-[#2a2d38] active:scale-[0.98] text-white text-xs sm:text-sm font-bold py-2.5 rounded-xl transition-colors cursor-pointer select-none text-center"
               >
-                {price}/month
+                {sub.formattedPrice}/month
               </button>
             </div>
-          );
-        })}
-      </div>
+          ))}
+        </div>
 
-      {/* Dots Indicator */}
-      <div className="flex justify-center items-center gap-1.5 mt-3">
-        {SUBSCRIPTIONS.map((_, i) => (
-          <button
-            key={i}
-            type="button"
-            onClick={() => setActiveSlide(i)}
-            className={`w-1.5 h-1.5 rounded-full transition-all ${
-              activeSlide === i ? 'bg-white w-4' : 'bg-white/20'
-            }`}
-          />
-        ))}
+        {/* Carousel Next Arrow Button - Round White Button with Black Icon matching Screenshot 2 */}
+        <button
+          type="button"
+          onClick={handleScrollRight}
+          className="flex absolute -right-2 sm:-right-3 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-white hover:bg-gray-100 text-black items-center justify-center shadow-2xl transition-transform active:scale-95 cursor-pointer z-10 select-none"
+          title="Next"
+        >
+          <ChevronRight className="w-5 h-5 text-black stroke-[2.5]" />
+        </button>
       </div>
     </section>
   );

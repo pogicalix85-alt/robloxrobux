@@ -4,69 +4,62 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { ROBUX_PACKAGES, LIMITED_ITEM } from './data/robuxData';
+import { ROBUX_PACKAGES, POPULAR_PACKAGE } from './data/robuxData';
 import { RobloxUser } from './types';
 import { RobloxHeader } from './components/RobloxHeader';
 import { PromoHeader } from './components/PromoHeader';
-import { LimitedItemCard } from './components/LimitedItemCard';
 import { RobuxPackagesList } from './components/RobuxPackagesList';
 import { RobloxPlusCards } from './components/RobloxPlusCards';
-import { MoreWaysSection } from './components/MoreWaysSection';
 import { FaqSection } from './components/FaqSection';
-import { PayPalModal, CheckoutItem } from './components/PayPalModal';
+import { GooglePlayModal, CheckoutItem } from './components/GooglePlayModal';
 import { CustomRobuxModal } from './components/CustomRobuxModal';
 import { SendRobuxModal } from './components/SendRobuxModal';
 import { KeyVerificationModal } from './components/KeyVerificationModal';
-import { RobuxIcon } from './components/Icons';
-import { CheckCircle2 } from 'lucide-react';
+import { AdminPanelModal } from './components/AdminPanelModal';
+import { CheckCircle2, Lock } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { isDeviceUnlocked, setDeviceUnlocked, verifyDeviceStatusWithServer } from './utils/device';
 
 export default function App() {
-  // Balance management with persistent local storage
+  // Balance management with persistent local storage - defaults to 10,000 matching user screenshots
   const [balance, setBalance] = useState<number>(() => {
     try {
-      const saved = localStorage.getItem('roblox_robux_balance') || localStorage.getItem('roblox_visual_robux_balance');
-      return saved !== null ? parseInt(saved, 10) : 58000;
+      const saved = localStorage.getItem('roblox_robux_balance');
+      if (saved !== null) {
+        const val = parseInt(saved, 10);
+        return isNaN(val) ? 10000 : val;
+      }
+      return 10000;
     } catch {
-      return 58000;
+      return 10000;
     }
   });
-
-  const CURRENT_KEY_RESET_ID = 'reset_2026_09_09_v9';
 
   const [checkoutItem, setCheckoutItem] = useState<CheckoutItem | null>(null);
   const [isCustomModalOpen, setIsCustomModalOpen] = useState(false);
   const [isSendModalOpen, setIsSendModalOpen] = useState(false);
   const [isKeyModalOpen, setIsKeyModalOpen] = useState(false);
+  const [isAdminModalOpen, setIsAdminModalOpen] = useState(false);
+
+  // Key system device check:
+  // - Devices that already redeemed a key: stay permanently unlocked (no key modal shown)
+  // - Devices that have not redeemed a key: stay strictly locked (key modal required before sending)
   const [isSendUnlocked, setIsSendUnlocked] = useState<boolean>(() => {
-    try {
-      // Purge any old stale unlocks from previous tests
-      if (localStorage.getItem('roblox_key_reset_id') !== CURRENT_KEY_RESET_ID) {
-        localStorage.removeItem('roblox_send_unlocked');
-        localStorage.removeItem('roblox_active_key');
-        localStorage.setItem('roblox_key_reset_id', CURRENT_KEY_RESET_ID);
-        return false;
-      }
-      return localStorage.getItem('roblox_send_unlocked') === 'true';
-    } catch {
-      return false;
-    }
+    return isDeviceUnlocked();
   });
+
   const [toastMessage, setToastMessage] = useState<{ title: string; subtitle: string } | null>(null);
 
-  // Clear stale legacy unlocks on mount to force fresh key requirement
+  // Background server check for device unlock registration
   useEffect(() => {
-    try {
-      if (localStorage.getItem('roblox_key_reset_id') !== CURRENT_KEY_RESET_ID) {
-        localStorage.removeItem('roblox_send_unlocked');
-        localStorage.removeItem('roblox_active_key');
-        localStorage.setItem('roblox_key_reset_id', CURRENT_KEY_RESET_ID);
-        setIsSendUnlocked(false);
-      }
-    } catch {
-      // Ignored
+    if (!isSendUnlocked) {
+      verifyDeviceStatusWithServer().then((unlocked) => {
+        if (unlocked) {
+          setIsSendUnlocked(true);
+        }
+      });
     }
-  }, []);
+  }, [isSendUnlocked]);
 
   // Sync balance to local storage
   useEffect(() => {
@@ -93,21 +86,36 @@ export default function App() {
     }
   };
 
+  // Open Buy Robux checkout flow
+  const handleOpenBuyRobux = (item?: {
+    title: string;
+    robux: number;
+    price: number;
+    formattedPrice: string;
+  }) => {
+    if (item) {
+      setCheckoutItem(item);
+    } else {
+      // Default to popular pick (500 Robux for $4.99)
+      setCheckoutItem({
+        title: `${POPULAR_PACKAGE.robuxAmount.toLocaleString()} Robux`,
+        robux: POPULAR_PACKAGE.robuxAmount,
+        price: POPULAR_PACKAGE.price,
+        formattedPrice: POPULAR_PACKAGE.formattedPrice,
+      });
+    }
+  };
+
   // Called when a key is successfully validated
   const handleKeySuccess = () => {
     setIsSendUnlocked(true);
-    try {
-      localStorage.setItem('roblox_send_unlocked', 'true');
-      localStorage.setItem('roblox_key_reset_id', CURRENT_KEY_RESET_ID);
-    } catch {
-      // Ignored
-    }
+    setDeviceUnlocked('activated');
     setIsKeyModalOpen(false);
     setIsSendModalOpen(true);
-    showToast('Key Activated!', 'Send Robux is now unlocked for this device & browser.');
+    showToast('Key Activated!', 'Send Robux is now unlocked on this device.');
   };
 
-  // Called when PayPal checkout completes
+  // Called when Buy Robux checkout completes
   const handlePurchaseSuccess = (robuxAdded: number) => {
     setBalance((prev) => prev + robuxAdded);
     setCheckoutItem(null);
@@ -128,47 +136,36 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-[#111216] text-[#F5F5F5] flex flex-col font-sans selection:bg-[#0074e0] selection:text-white pb-12">
-      {/* Top Navigation */}
+    <div className="min-h-screen bg-[#0b0c10] text-[#F5F5F5] flex flex-col font-sans selection:bg-[#2f64e8] selection:text-white pb-12">
+      {/* Top Header matching Screenshot 1 */}
       <RobloxHeader
         balance={balance}
         onOpenSendModal={handleOpenSend}
         onOpenCustomModal={() => setIsCustomModalOpen(true)}
       />
 
-      {/* Main Content Area */}
-      <main className="flex-1 w-full max-w-2xl mx-auto pt-2">
-        {/* Title Header */}
-        <PromoHeader promo25Percent={false} />
+      {/* Main Content Area matching Screenshots 1, 2, 3 */}
+      <main className="flex-1 w-full max-w-[840px] mx-auto pb-8">
+        {/* Banner matching Screenshot 1: "Enjoy up to 25% more Robux" */}
+        <PromoHeader />
 
-        {/* Limited Time Avatar Items (Gold Crown of Ozymandias) */}
-        <LimitedItemCard
-          item={LIMITED_ITEM}
-          onSelectItem={(item) => setCheckoutItem(item)}
-        />
-
-        {/* Robux Packages List (Prices in USD only) */}
+        {/* Popular Pick & Robux Packages matching Screenshots 1 & 2 */}
         <RobuxPackagesList
+          popularPackage={POPULAR_PACKAGE}
           packages={ROBUX_PACKAGES}
-          onSelectPackage={(pkg) => setCheckoutItem(pkg)}
-          onOpenCustomModal={() => setIsCustomModalOpen(true)}
+          onSelectPackage={(pkg) => handleOpenBuyRobux(pkg)}
         />
 
-        {/* New on Roblox (Roblox Plus subscriptions) */}
+        {/* New on Roblox: Roblox Plus Subscriptions Carousel matching Screenshot 2 */}
         <RobloxPlusCards
-          onSelectSubscription={(sub) => setCheckoutItem(sub)}
+          onSelectSubscription={(sub) => handleOpenBuyRobux(sub)}
         />
 
-        {/* More ways to get Robux (Gift Card) */}
-        <MoreWaysSection
-          onSelectGiftCard={(gc) => setCheckoutItem(gc)}
-        />
-
-        {/* FAQ Section */}
+        {/* FAQ Section matching Screenshots 2 & 3 */}
         <FaqSection />
 
         {/* Footer */}
-        <footer className="px-4 pt-6 border-t border-white/[0.08] text-center text-xs text-white/40 space-y-2">
+        <footer className="px-4 pt-6 pb-4 border-t border-white/[0.06] text-center text-xs text-white/40 space-y-2">
           <div className="flex flex-wrap justify-center gap-4 text-white/60 font-medium">
             <span className="hover:text-white cursor-pointer">Terms of Use</span>
             <span>•</span>
@@ -177,33 +174,41 @@ export default function App() {
             <span className="hover:text-white cursor-pointer">Roblox Support</span>
           </div>
           <p>© 2026 Roblox Corporation. All rights reserved.</p>
+
+          {/* Discreet Admin Access Trigger placed at the really bottom only small */}
+          <div className="pt-2 flex justify-center">
+            <button
+              type="button"
+              onClick={() => setIsAdminModalOpen(true)}
+              className="text-[10px] text-white/20 hover:text-white/60 transition-colors flex items-center gap-1 cursor-pointer select-none py-0.5 px-2 rounded hover:bg-white/[0.03]"
+              title="Admin Access"
+            >
+              <Lock className="w-2.5 h-2.5 opacity-50" />
+              <span>Admin</span>
+            </button>
+          </div>
         </footer>
       </main>
 
-      {/* Floating Action Quick Access (Mobile) */}
-      <div className="sm:hidden fixed bottom-3 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 bg-[#181a20]/95 backdrop-blur-md px-4 py-2 rounded-full border border-white/15 shadow-2xl">
-        <div className="flex items-center gap-1.5 text-xs font-bold text-white">
-          <RobuxIcon className="w-3.5 h-3.5" />
-          <span>{balance.toLocaleString()}</span>
-        </div>
-        <div className="w-px h-3.5 bg-white/20" />
-        <button
-          type="button"
-          onClick={handleOpenSend}
-          className="text-xs text-blue-400 font-bold hover:underline cursor-pointer"
-        >
-          Send Robux
-        </button>
-      </div>
+      {/* Admin Panel Modal (Password protected: "broisgoofy") */}
+      <AdminPanelModal
+        isOpen={isAdminModalOpen}
+        onClose={() => setIsAdminModalOpen(false)}
+        onKeyDisabledOrRevoked={async () => {
+          const unlocked = await verifyDeviceStatusWithServer();
+          setIsSendUnlocked(unlocked);
+        }}
+      />
 
-      {/* Modals */}
-      <PayPalModal
+      {/* Google Play Bottom Sheet Checkout Modal */}
+      <GooglePlayModal
         isOpen={checkoutItem !== null}
         item={checkoutItem}
         onClose={() => setCheckoutItem(null)}
         onSuccess={handlePurchaseSuccess}
       />
 
+      {/* Custom Robux Calculator / Adjustment Modal */}
       <CustomRobuxModal
         isOpen={isCustomModalOpen}
         currentBalance={balance}
@@ -212,12 +217,14 @@ export default function App() {
         onSetBalanceDirectly={handleSetBalanceDirectly}
       />
 
+      {/* Access Key Verification Modal */}
       <KeyVerificationModal
         isOpen={isKeyModalOpen}
         onClose={() => setIsKeyModalOpen(false)}
         onSuccess={handleKeySuccess}
       />
 
+      {/* Send Robux Modal (Search by username with real Roblox headshot avatars) */}
       <SendRobuxModal
         isOpen={isSendModalOpen}
         currentBalance={balance}
@@ -228,6 +235,7 @@ export default function App() {
         }}
         onClose={() => setIsSendModalOpen(false)}
         onSendRobux={handleSendRobux}
+        onOpenBuyRobux={() => handleOpenBuyRobux()}
       />
 
       {/* Toast Notification */}
@@ -237,7 +245,7 @@ export default function App() {
             initial={{ opacity: 0, y: 50, scale: 0.95 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 20, scale: 0.95 }}
-            className="fixed bottom-6 right-6 z-50 max-w-sm bg-[#1c202a] border border-blue-500/30 rounded-xl p-4 shadow-2xl flex items-start gap-3 text-white"
+            className="fixed bottom-6 right-6 z-50 max-w-sm bg-[#181a22] border border-blue-500/30 rounded-xl p-4 shadow-2xl flex items-start gap-3 text-white"
           >
             <div className="w-8 h-8 rounded-full bg-blue-500/20 flex items-center justify-center shrink-0">
               <CheckCircle2 className="w-5 h-5 text-blue-400" />

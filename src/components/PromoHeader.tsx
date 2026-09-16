@@ -1,37 +1,48 @@
 import React from 'react';
-import { Sparkles, Info } from 'lucide-react';
 
-interface PromoHeaderProps {
-  promo25Percent: boolean;
-}
-
-export const PromoHeader: React.FC<PromoHeaderProps> = ({ promo25Percent }) => {
+export const PromoHeader: React.FC = () => {
   return (
-    <div className="relative pt-6 pb-4 px-4 overflow-hidden">
-      {/* Subtle topographic wave grid in background */}
+    <div className="relative pt-8 pb-7 px-4 overflow-hidden text-center select-none">
+      {/* 3D Wave / Topographic contour wireframe lines matching Screenshot 1 */}
       <div 
-        className="absolute inset-0 opacity-[0.07] pointer-events-none"
+        className="absolute inset-0 opacity-[0.10] pointer-events-none"
         style={{
-          backgroundImage: `radial-gradient(circle at 50% 20%, #ffffff 1px, transparent 1px), linear-gradient(to right, #ffffff08 1px, transparent 1px), linear-gradient(to bottom, #ffffff08 1px, transparent 1px)`,
-          backgroundSize: '24px 24px, 16px 16px, 16px 16px',
+          backgroundImage: `
+            radial-gradient(ellipse 70% 60% at 50% 10%, #ffffff 0%, transparent 70%),
+            repeating-radial-gradient(circle at 50% -20%, transparent 0, transparent 24px, #ffffff 25px, transparent 26px)
+          `,
+          maskImage: 'linear-gradient(to bottom, rgba(0,0,0,1) 40%, rgba(0,0,0,0) 100%)',
+          WebkitMaskImage: 'linear-gradient(to bottom, rgba(0,0,0,1) 40%, rgba(0,0,0,0) 100%)',
         }}
       />
       
-      <div className="relative z-10 flex flex-col items-start gap-1">
+      {/* SVG Mesh curves for organic contour lines */}
+      <svg
+        className="absolute inset-0 w-full h-full opacity-[0.08] pointer-events-none"
+        viewBox="0 0 1000 300"
+        preserveAspectRatio="none"
+        fill="none"
+        xmlns="http://www.w3.org/2000/svg"
+      >
+        <path d="M0,80 Q250,20 500,80 T1000,80" stroke="white" strokeWidth="1" />
+        <path d="M0,110 Q250,50 500,110 T1000,110" stroke="white" strokeWidth="1" />
+        <path d="M0,140 Q250,80 500,140 T1000,140" stroke="white" strokeWidth="1" />
+        <path d="M0,170 Q250,110 500,170 T1000,170" stroke="white" strokeWidth="1" />
+        <path d="M0,200 Q250,140 500,200 T1000,200" stroke="white" strokeWidth="1" />
+      </svg>
+      
+      <div className="relative z-10 max-w-xl mx-auto flex flex-col items-center">
         <h1 
           id="main-page-title"
-          className="text-3xl sm:text-4xl font-extrabold tracking-tight text-white"
+          className="text-4xl sm:text-[46px] font-black tracking-tight text-white font-sans leading-[1.1]"
+          style={{ letterSpacing: '-0.035em' }}
         >
-          {promo25Percent ? 'Enjoy up to 25% more Robux' : 'Buy Robux'}
+          Enjoy up to 25%
+          <br />
+          more Robux
         </h1>
-        
-        {promo25Percent && (
-          <p className="text-xs sm:text-sm text-blue-400 font-medium flex items-center gap-1.5 mt-0.5">
-            <Sparkles className="w-3.5 h-3.5" />
-            Limited time promotion applied to select packages & gift cards
-          </p>
-        )}
       </div>
     </div>
   );
 };
+

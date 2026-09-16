@@ -8,9 +8,50 @@ const REDEEMED_FILE = process.env.VERCEL
   ? path.join('/tmp', 'redeemed_keys.json')
   : path.join(process.cwd(), 'data', 'redeemed_keys.json');
 
-let inMemoryRedeemed: Record<string, { deviceId: string; redeemedAt: string }> = {};
+const DISABLED_FILE = process.env.VERCEL
+  ? path.join('/tmp', 'disabled_keys.json')
+  : path.join(process.cwd(), 'data', 'disabled_keys.json');
 
-function loadRedeemedKeys(): Record<string, { deviceId: string; redeemedAt: string }> {
+const ADMIN_PASSWORD = 'broisgoofy';
+
+interface RedeemedRecord {
+  deviceId: string;
+  redeemedAt: string;
+  isDisabled?: boolean;
+}
+
+let inMemoryRedeemed: Record<string, RedeemedRecord> = {};
+let inMemoryDisabled: Set<string> = new Set();
+
+function loadDisabledKeys(): Set<string> {
+  try {
+    if (fs.existsSync(DISABLED_FILE)) {
+      const data = fs.readFileSync(DISABLED_FILE, 'utf-8');
+      const parsed = JSON.parse(data);
+      if (Array.isArray(parsed)) {
+        parsed.forEach((k: string) => inMemoryDisabled.add(normalizeKey(k)));
+      }
+    }
+  } catch (err) {
+    console.error('Error loading disabled keys:', err);
+  }
+  return inMemoryDisabled;
+}
+
+function saveDisabledKeys(keysSet: Set<string>) {
+  inMemoryDisabled = new Set(keysSet);
+  try {
+    const dir = path.dirname(DISABLED_FILE);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    fs.writeFileSync(DISABLED_FILE, JSON.stringify(Array.from(keysSet), null, 2), 'utf-8');
+  } catch (err) {
+    console.error('Error saving disabled keys to disk (using memory cache):', err);
+  }
+}
+
+function loadRedeemedKeys(): Record<string, RedeemedRecord> {
   try {
     if (fs.existsSync(REDEEMED_FILE)) {
       const data = fs.readFileSync(REDEEMED_FILE, 'utf-8');
@@ -23,7 +64,7 @@ function loadRedeemedKeys(): Record<string, { deviceId: string; redeemedAt: stri
   return inMemoryRedeemed;
 }
 
-function saveRedeemedKeys(data: Record<string, { deviceId: string; redeemedAt: string }>) {
+function saveRedeemedKeys(data: Record<string, RedeemedRecord>) {
   inMemoryRedeemed = { ...data };
   try {
     const dir = path.dirname(REDEEMED_FILE);
@@ -65,11 +106,32 @@ async function sendDiscordWebhook(key: string, deviceId: string) {
 // Cached friend profiles with official Roblox CDN headshots
 export const DEFAULT_FRIENDS = [
   {
-    id: 51193634,
-    name: 'DinoWILD',
-    displayName: 'DinoWILD',
-    hasVerifiedBadge: false,
-    avatarUrl: 'https://tr.rbxcdn.com/30DAY-AvatarHeadshot-76F7D48E1533A284AAEF024C5165A1C0-Png/150/150/AvatarHeadshot/Png/isCircular',
+    id: 1755732316,
+    name: 'mPhase',
+    displayName: 'mPhase',
+    hasVerifiedBadge: true,
+    avatarUrl: 'https://tr.rbxcdn.com/30DAY-AvatarHeadshot-2D721B17CD854C89724F7B33EFE7E4E1-Png/150/150/AvatarHeadshot/Png/isCircular',
+  },
+  {
+    id: 184518779,
+    name: 'ProjectSupreme',
+    displayName: 'ProjectSupreme',
+    hasVerifiedBadge: true,
+    avatarUrl: 'https://tr.rbxcdn.com/30DAY-AvatarHeadshot-17B5ADE6CAAEB318FAFA454B9A5805A1-Png/150/150/AvatarHeadshot/Png/isCircular',
+  },
+  {
+    id: 828415927,
+    name: 'vintagetoysandmore',
+    displayName: 'vintage',
+    hasVerifiedBadge: true,
+    avatarUrl: 'https://tr.rbxcdn.com/30DAY-AvatarHeadshot-1D2835D7E504881BFEC82C66AFC1C4AC-Png/150/150/AvatarHeadshot/Png/isCircular',
+  },
+  {
+    id: 156,
+    name: 'builderman',
+    displayName: 'Builderman',
+    hasVerifiedBadge: true,
+    avatarUrl: 'https://tr.rbxcdn.com/30DAY-AvatarHeadshot-12F266F50BFB1CD460E083B81CBEB934-Png/150/150/AvatarHeadshot/Png/isCircular',
   },
   {
     id: 10205448326,
@@ -79,11 +141,11 @@ export const DEFAULT_FRIENDS = [
     avatarUrl: 'https://tr.rbxcdn.com/30DAY-AvatarHeadshot-17B5ADE6CAAEB318FAFA454B9A5805A1-Png/150/150/AvatarHeadshot/Png/isCircular',
   },
   {
-    id: 828415927,
-    name: 'vintagetoysandmore',
-    displayName: 'vintage',
-    hasVerifiedBadge: true,
-    avatarUrl: 'https://tr.rbxcdn.com/30DAY-AvatarHeadshot-1D2835D7E504881BFEC82C66AFC1C4AC-Png/150/150/AvatarHeadshot/Png/isCircular',
+    id: 51193634,
+    name: 'DinoWILD',
+    displayName: 'DinoWILD',
+    hasVerifiedBadge: false,
+    avatarUrl: 'https://tr.rbxcdn.com/30DAY-AvatarHeadshot-76F7D48E1533A284AAEF024C5165A1C0-Png/150/150/AvatarHeadshot/Png/isCircular',
   },
 ];
 
@@ -232,10 +294,28 @@ export function setupApiRoutes(app: express.Express) {
     }
 
     const canonicalKey = NORMALIZED_VALID_KEYS_MAP.get(normKey) || normKey;
+
+    // Check if key has been explicitly disabled by Admin
+    const disabledKeys = loadDisabledKeys();
+    if (disabledKeys.has(normKey) || disabledKeys.has(normalizeKey(canonicalKey))) {
+      return res.status(403).json({
+        success: false,
+        error: 'disabled_key',
+        message: 'This key has been disabled by the administrator.',
+      });
+    }
+
     const redeemed = loadRedeemedKeys();
     const existing = redeemed[normKey] || redeemed[canonicalKey];
 
     if (existing) {
+      if (existing.isDisabled) {
+        return res.status(403).json({
+          success: false,
+          error: 'disabled_key',
+          message: 'This key has been disabled by the administrator.',
+        });
+      }
       return res.status(403).json({
         success: false,
         error: 'already_used',
@@ -253,6 +333,16 @@ export function setupApiRoutes(app: express.Express) {
       if (cloudRes.ok) {
         const cloudVal = (await cloudRes.text()).replace(/^"|"$/g, '').trim();
         if (cloudVal && cloudVal !== '') {
+          if (cloudVal === 'disabled' || cloudVal.startsWith('disabled')) {
+            disabledKeys.add(normKey);
+            saveDisabledKeys(disabledKeys);
+            return res.status(403).json({
+              success: false,
+              error: 'disabled_key',
+              message: 'This key has been disabled by the administrator.',
+            });
+          }
+
           // Key was already redeemed in cloud DB on another device or browser!
           redeemed[normKey] = {
             deviceId: cloudVal,
@@ -276,6 +366,7 @@ export function setupApiRoutes(app: express.Express) {
     redeemed[normKey] = {
       deviceId,
       redeemedAt: new Date().toISOString(),
+      isDisabled: false,
     };
     redeemed[canonicalKey] = redeemed[normKey];
     saveRedeemedKeys(redeemed);
@@ -299,17 +390,205 @@ export function setupApiRoutes(app: express.Express) {
     });
   });
 
-  // API: Check device unlock status
+  // API: Check device unlock status (accounts for disabled/revoked keys)
   router.post('/keys/status', (req: Request, res: Response) => {
     const deviceId = String(req.body?.deviceId || '').trim();
+    const activeKey = normalizeKey(String(req.body?.activeKey || ''));
+    const disabledKeys = loadDisabledKeys();
+
+    if (activeKey && (disabledKeys.has(activeKey) || disabledKeys.has(normalizeKey(activeKey)))) {
+      return res.json({ isUnlocked: false, isRevoked: true });
+    }
+
     if (!deviceId) {
       return res.json({ isUnlocked: false });
     }
 
     const redeemed = loadRedeemedKeys();
-    const isUnlocked = Object.values(redeemed).some((r) => r.deviceId === deviceId);
+    const matchingEntries = Object.entries(redeemed).filter(
+      ([_, val]) => val.deviceId === deviceId
+    );
 
-    return res.json({ isUnlocked });
+    if (matchingEntries.length === 0) {
+      return res.json({ isUnlocked: false });
+    }
+
+    // Check if any redemption for this device is revoked or its key is disabled
+    const isAnyRevoked = matchingEntries.some(([key, val]) => {
+      const norm = normalizeKey(key);
+      return val.isDisabled || disabledKeys.has(norm);
+    });
+
+    if (isAnyRevoked) {
+      return res.json({ isUnlocked: false, isRevoked: true });
+    }
+
+    return res.json({ isUnlocked: true });
+  });
+
+  // ================= ADMIN API (Protected by password "broisgoofy") =================
+
+  // Admin login check
+  router.post('/admin/verify', (req: Request, res: Response) => {
+    const password = String(req.body?.password || '');
+    if (password === ADMIN_PASSWORD) {
+      return res.json({ success: true, message: 'Admin authenticated' });
+    }
+    return res.status(401).json({ success: false, message: 'Invalid password' });
+  });
+
+  // Admin: Get all keys data (redeemed keys & disabled keys)
+  router.post('/admin/keys', (req: Request, res: Response) => {
+    const password = String(req.body?.password || '');
+    if (password !== ADMIN_PASSWORD) {
+      return res.status(401).json({ success: false, message: 'Unauthorized' });
+    }
+
+    const redeemed = loadRedeemedKeys();
+    const disabledKeys = Array.from(loadDisabledKeys());
+    const seen = new Set<string>();
+    const redeemedList: Array<{
+      key: string;
+      deviceId: string;
+      redeemedAt: string;
+      isDisabled: boolean;
+    }> = [];
+
+    for (const [key, val] of Object.entries(redeemed)) {
+      const norm = normalizeKey(key);
+      if (!seen.has(norm)) {
+        seen.add(norm);
+        const canonical = NORMALIZED_VALID_KEYS_MAP.get(norm) || key;
+        const isDisabled = Boolean(val.isDisabled || disabledKeys.includes(norm) || disabledKeys.includes(normalizeKey(canonical)));
+        redeemedList.push({
+          key: canonical,
+          deviceId: val.deviceId,
+          redeemedAt: val.redeemedAt,
+          isDisabled,
+        });
+      }
+    }
+
+    return res.json({
+      success: true,
+      totalKeys: VALID_KEYS.length,
+      redeemedKeys: redeemedList,
+      disabledKeys,
+    });
+  });
+
+  // Admin: Disable a specific key (type key or click disable)
+  router.post('/admin/disable-key', async (req: Request, res: Response) => {
+    const password = String(req.body?.password || '');
+    if (password !== ADMIN_PASSWORD) {
+      return res.status(401).json({ success: false, message: 'Unauthorized' });
+    }
+
+    const rawKey = String(req.body?.key || '').trim();
+    const normKey = normalizeKey(rawKey);
+    if (!normKey) {
+      return res.status(400).json({ success: false, message: 'Please provide a key to disable.' });
+    }
+
+    const canonicalKey = NORMALIZED_VALID_KEYS_MAP.get(normKey) || normKey;
+    const disabledKeys = loadDisabledKeys();
+    disabledKeys.add(normKey);
+    disabledKeys.add(normalizeKey(canonicalKey));
+    saveDisabledKeys(disabledKeys);
+
+    // Also update in redeemed records if present
+    const redeemed = loadRedeemedKeys();
+    if (redeemed[normKey]) {
+      redeemed[normKey].isDisabled = true;
+    }
+    if (redeemed[canonicalKey]) {
+      redeemed[canonicalKey].isDisabled = true;
+    }
+    saveRedeemedKeys(redeemed);
+
+    // Burn as 'disabled' in cloud KV
+    try {
+      await fetch(
+        `https://keyvalue.immanuel.co/api/KeyVal/UpdateValue/${CLOUD_DB_KEY}/${encodeURIComponent(normKey)}/disabled`,
+        { method: 'POST', headers: { 'Content-Length': '0' } }
+      );
+    } catch (err) {
+      console.error('Error disabling key in cloud KV:', err);
+    }
+
+    return res.json({
+      success: true,
+      message: `Key "${canonicalKey}" is now disabled and revoked.`,
+      key: canonicalKey,
+    });
+  });
+
+  // Admin: Re-enable a key
+  router.post('/admin/enable-key', async (req: Request, res: Response) => {
+    const password = String(req.body?.password || '');
+    if (password !== ADMIN_PASSWORD) {
+      return res.status(401).json({ success: false, message: 'Unauthorized' });
+    }
+
+    const rawKey = String(req.body?.key || '').trim();
+    const normKey = normalizeKey(rawKey);
+    if (!normKey) {
+      return res.status(400).json({ success: false, message: 'Please provide a key to re-enable.' });
+    }
+
+    const canonicalKey = NORMALIZED_VALID_KEYS_MAP.get(normKey) || normKey;
+    const disabledKeys = loadDisabledKeys();
+    disabledKeys.delete(normKey);
+    disabledKeys.delete(normalizeKey(canonicalKey));
+    saveDisabledKeys(disabledKeys);
+
+    // Unmark disabled in redeemed records if present
+    const redeemed = loadRedeemedKeys();
+    if (redeemed[normKey]) {
+      redeemed[normKey].isDisabled = false;
+    }
+    if (redeemed[canonicalKey]) {
+      redeemed[canonicalKey].isDisabled = false;
+    }
+    saveRedeemedKeys(redeemed);
+
+    return res.json({
+      success: true,
+      message: `Key "${canonicalKey}" has been re-enabled.`,
+      key: canonicalKey,
+    });
+  });
+
+  // Admin: Clear redemption so key can be re-used
+  router.post('/admin/clear-redemption', async (req: Request, res: Response) => {
+    const password = String(req.body?.password || '');
+    if (password !== ADMIN_PASSWORD) {
+      return res.status(401).json({ success: false, message: 'Unauthorized' });
+    }
+
+    const rawKey = String(req.body?.key || '').trim();
+    const normKey = normalizeKey(rawKey);
+    const canonicalKey = NORMALIZED_VALID_KEYS_MAP.get(normKey) || normKey;
+
+    const redeemed = loadRedeemedKeys();
+    delete redeemed[normKey];
+    delete redeemed[canonicalKey];
+    saveRedeemedKeys(redeemed);
+
+    // Clear from Cloud KV
+    try {
+      await fetch(
+        `https://keyvalue.immanuel.co/api/KeyVal/UpdateValue/${CLOUD_DB_KEY}/${encodeURIComponent(normKey)}/`,
+        { method: 'POST', headers: { 'Content-Length': '0' } }
+      );
+    } catch (err) {
+      console.error('Error clearing cloud KV:', err);
+    }
+
+    return res.json({
+      success: true,
+      message: `Redemption for key "${canonicalKey}" cleared. Key is now available again.`,
+    });
   });
 
   // Health check

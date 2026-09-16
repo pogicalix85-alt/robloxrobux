@@ -106,32 +106,42 @@ export function VerifiedBadge({ className = 'w-4 h-4' }: IconProps) {
 }
 
 /**
- * Send Robux Hexagon Icon (from Send Robux header)
+ * Roblox Plus / Send Robux Hexagon Brand Logo (from New on Roblox & Send Robux header)
  */
-export function SendRobuxIcon({ className = 'w-5 h-5' }: IconProps) {
+export function RobloxPlusHexagonIcon({ className = 'w-5 h-5', size }: IconProps) {
+  const style = size ? { width: size, height: size } : undefined;
   return (
     <svg
       viewBox="0 0 24 24"
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
       className={`inline-block shrink-0 ${className}`}
-      aria-label="Send Robux"
+      style={style}
+      aria-label="Roblox Plus"
     >
       <path
-        d="M17.5 4.5L6.5 10.5L11.5 13.5L14.5 18.5L17.5 4.5Z"
+        d="M12 2.5L20.5 7.4V16.6L12 21.5L3.5 16.6V7.4L12 2.5Z"
         stroke="currentColor"
         strokeWidth="2"
-        strokeLinejoin="round"
         strokeLinecap="round"
+        strokeLinejoin="round"
       />
       <path
-        d="M11.5 13.5L17 5"
+        d="M8.5 18V6.5H14.5C16.1569 6.5 17.5 7.84315 17.5 9.5C17.5 11.1569 16.1569 12.5 14.5 12.5H8.5"
         stroke="currentColor"
         strokeWidth="2"
         strokeLinecap="round"
+        strokeLinejoin="round"
       />
     </svg>
   );
+}
+
+/**
+ * Send Robux Hexagon Icon (from Send Robux header)
+ */
+export function SendRobuxIcon({ className = 'w-5 h-5', size }: IconProps) {
+  return <RobloxPlusHexagonIcon className={className} size={size} />;
 }
 
 /**

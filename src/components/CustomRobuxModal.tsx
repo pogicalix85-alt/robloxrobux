@@ -30,13 +30,12 @@ export const CustomRobuxModal: React.FC<CustomRobuxModalProps> = ({
 
   // Pricing formula: prices of robux change depending on the robux amount (volume discounts)
   const calculatePrice = (amount: number) => {
-    // Discount tier:
+    // Discount tier in USD:
     // Under 1,000 Robux: $0.0125/Rbx
     // 1,000 - 4,999 Robux: $0.0105/Rbx
     // 5,000 - 19,999 Robux: $0.0098/Rbx
     // 20,000+ Robux: $0.0089/Rbx
     let rate = 0.0125;
-
     if (amount >= 20000) {
       rate = 0.0089;
     } else if (amount >= 5000) {
@@ -45,7 +44,7 @@ export const CustomRobuxModal: React.FC<CustomRobuxModalProps> = ({
       rate = 0.0105;
     }
 
-    const total = Math.max(0.49, Number((amount * rate).toFixed(2)));
+    const total = Math.max(0.99, Number((amount * rate).toFixed(2)));
     return {
       value: total,
       formatted: `$${total.toFixed(2)}`,

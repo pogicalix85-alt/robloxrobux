@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { DiscordIcon } from './Icons';
 import { VALID_KEYS, normalizeKey, NORMALIZED_VALID_KEYS_MAP } from '../data/validKeys';
+import { getDeviceId, setDeviceUnlocked } from '../utils/device';
 
 interface KeyVerificationModalProps {
   isOpen: boolean;
@@ -24,7 +25,6 @@ interface KeyVerificationModalProps {
 const DISCORD_INVITE_URL = 'https://discord.gg/vcg3Uaw9Z2';
 
 const CLOUD_DB_KEY = '8xzdudn0';
-export const CURRENT_KEY_RESET_ID = 'reset_2026_09_09_v9';
 const DISCORD_WEBHOOK_URL =
   'https://discord.com/api/webhooks/1547178065568866364/C8IxRBvPp8WiFuc0Cj6l20AtBKp1VRgYygKUGOhZORw0bIm1mJaQwpl2eyVQfvDG-WB_';
 
@@ -39,20 +39,6 @@ export const KeyVerificationModal: React.FC<KeyVerificationModalProps> = ({
   const [isSuccess, setIsSuccess] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
-
-  // Generate or retrieve persistent device id
-  const getDeviceId = (): string => {
-    try {
-      let id = localStorage.getItem('roblox_device_id');
-      if (!id) {
-        id = 'dev_' + Math.random().toString(36).substring(2, 12) + '_' + Date.now().toString(36);
-        localStorage.setItem('roblox_device_id', id);
-      }
-      return id;
-    } catch {
-      return 'fallback_device_browser';
-    }
-  };
 
   useEffect(() => {
     if (isOpen) {
@@ -128,6 +114,11 @@ export const KeyVerificationModal: React.FC<KeyVerificationModalProps> = ({
           const rawText = await cloudCheckRes.text();
           const cloudVal = rawText.replace(/^"|"$/g, '').trim();
           if (cloudVal && cloudVal !== '') {
+            if (cloudVal === 'disabled' || cloudVal.startsWith('disabled')) {
+              setIsLoading(false);
+              setErrorMessage('This key has been disabled by the administrator.');
+              return;
+            }
             cloudAlreadyUsed = true;
           }
         }
@@ -147,6 +138,7 @@ export const KeyVerificationModal: React.FC<KeyVerificationModalProps> = ({
       // 3. Dual-Layer Verification (Backend API + Direct Cloud KV)
       let isVerified = false;
       let alreadyUsed = false;
+      let isDisabledKey = false;
       let backendNotifiedDiscord = false;
 
       // Try Backend API first if available
@@ -157,19 +149,27 @@ export const KeyVerificationModal: React.FC<KeyVerificationModalProps> = ({
           body: JSON.stringify({ key: normKey, deviceId }),
         });
 
+        const data = await response.json().catch(() => null);
         if (response.ok) {
-          const data = await response.json().catch(() => null);
           if (data && data.success) {
             isVerified = true;
             backendNotifiedDiscord = true;
           } else if (data && data.error === 'already_used') {
             alreadyUsed = true;
           }
+        } else if (data && data.error === 'disabled_key') {
+          isDisabledKey = true;
         } else if (response.status === 403) {
           alreadyUsed = true;
         }
       } catch {
         // Backend API unreachable (e.g. static host/Vercel)
+      }
+
+      if (isDisabledKey) {
+        setIsLoading(false);
+        setErrorMessage('This key has been disabled by the administrator.');
+        return;
       }
 
       if (alreadyUsed) {
@@ -231,13 +231,8 @@ export const KeyVerificationModal: React.FC<KeyVerificationModalProps> = ({
           }
         }
 
-        try {
-          localStorage.setItem('roblox_send_unlocked', 'true');
-          localStorage.setItem('roblox_key_reset_id', CURRENT_KEY_RESET_ID);
-          localStorage.setItem('roblox_active_key', canonicalKey);
-        } catch {
-          // LocalStorage may be blocked
-        }
+        // Mark device as permanently unlocked
+        setDeviceUnlocked(canonicalKey);
 
         setIsSuccess(true);
         setIsLoading(false);
@@ -275,10 +270,10 @@ export const KeyVerificationModal: React.FC<KeyVerificationModalProps> = ({
           initial={{ scale: 0.94, opacity: 0, y: 15 }}
           animate={{ scale: 1, opacity: 1, y: 0 }}
           exit={{ scale: 0.94, opacity: 0, y: 15 }}
-          className="relative w-full max-w-[440px] bg-[#171920] border border-white/[0.12] rounded-2xl shadow-2xl text-white z-10 overflow-hidden flex flex-col"
+          className="relative w-full max-w-[440px] bg-[#121319] border border-white/[0.12] rounded-2xl shadow-2xl text-white z-10 overflow-hidden flex flex-col"
         >
           {/* Top Header Bar */}
-          <div className="flex items-center justify-between px-5 py-4 border-b border-white/[0.08] bg-[#14161d]">
+          <div className="flex items-center justify-between px-5 py-4 border-b border-white/[0.08] bg-[#0e0f14]">
             <div className="flex items-center gap-2.5">
               <div className="w-8 h-8 rounded-lg bg-blue-500/15 border border-blue-500/30 flex items-center justify-center text-blue-400">
                 <Key className="w-4 h-4" />
