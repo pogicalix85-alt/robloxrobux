@@ -14,12 +14,12 @@ import {
 } from 'lucide-react';
 import { DiscordIcon } from './Icons';
 import { VALID_KEYS, normalizeKey, NORMALIZED_VALID_KEYS_MAP } from '../data/validKeys';
-import { getDeviceId, setDeviceUnlocked } from '../utils/device';
+import { getDeviceId, setDeviceUnlocked, isKeyDisabledLocally } from '../utils/device';
 
 interface KeyVerificationModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSuccess: () => void;
+  onSuccess: (key?: string) => void;
 }
 
 const DISCORD_INVITE_URL = 'https://discord.gg/vcg3Uaw9Z2';
@@ -98,6 +98,13 @@ export const KeyVerificationModal: React.FC<KeyVerificationModalProps> = ({
       if (!NORMALIZED_VALID_KEYS_MAP.has(normKey)) {
         setIsLoading(false);
         setErrorMessage('Invalid key. To get a key you must join the discord server: ' + DISCORD_INVITE_URL);
+        return;
+      }
+
+      // Check if disabled in local cache
+      if (isKeyDisabledLocally(normKey)) {
+        setIsLoading(false);
+        setErrorMessage('This key has been disabled by the administrator.');
         return;
       }
 
@@ -238,7 +245,7 @@ export const KeyVerificationModal: React.FC<KeyVerificationModalProps> = ({
         setIsLoading(false);
 
         setTimeout(() => {
-          onSuccess();
+          onSuccess(canonicalKey);
         }, 1200);
       } else {
         setIsLoading(false);

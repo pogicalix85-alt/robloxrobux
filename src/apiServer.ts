@@ -393,37 +393,52 @@ export function setupApiRoutes(app: express.Express) {
   // API: Check device unlock status (accounts for disabled/revoked keys)
   router.post('/keys/status', (req: Request, res: Response) => {
     const deviceId = String(req.body?.deviceId || '').trim();
-    const activeKey = normalizeKey(String(req.body?.activeKey || ''));
+    const rawActiveKey = String(req.body?.activeKey || '').trim();
+    const activeKey = normalizeKey(rawActiveKey);
     const disabledKeys = loadDisabledKeys();
 
+    // 1. If device's active key is specifically marked as disabled -> REVOKED!
     if (activeKey && (disabledKeys.has(activeKey) || disabledKeys.has(normalizeKey(activeKey)))) {
-      return res.json({ isUnlocked: false, isRevoked: true });
-    }
-
-    if (!deviceId) {
-      return res.json({ isUnlocked: false });
+      return res.json({ isUnlocked: false, isRevoked: true, reason: 'disabled_key' });
     }
 
     const redeemed = loadRedeemedKeys();
-    const matchingEntries = Object.entries(redeemed).filter(
-      ([_, val]) => val.deviceId === deviceId
-    );
 
-    if (matchingEntries.length === 0) {
-      return res.json({ isUnlocked: false });
+    // 2. Check if active key is in redeemed records and disabled
+    if (activeKey && (redeemed[activeKey] || redeemed[rawActiveKey])) {
+      const rec = redeemed[activeKey] || redeemed[rawActiveKey];
+      if (rec.isDisabled) {
+        return res.json({ isUnlocked: false, isRevoked: true, reason: 'disabled_key' });
+      }
+      return res.json({ isUnlocked: true });
     }
 
-    // Check if any redemption for this device is revoked or its key is disabled
-    const isAnyRevoked = matchingEntries.some(([key, val]) => {
-      const norm = normalizeKey(key);
-      return val.isDisabled || disabledKeys.has(norm);
-    });
+    // 3. Check by deviceId across all redeemed records
+    if (deviceId) {
+      const matchingEntries = Object.entries(redeemed).filter(
+        ([_, val]) => val.deviceId === deviceId
+      );
 
-    if (isAnyRevoked) {
-      return res.json({ isUnlocked: false, isRevoked: true });
+      if (matchingEntries.length > 0) {
+        const isAnyRevoked = matchingEntries.some(([key, val]) => {
+          const norm = normalizeKey(key);
+          return val.isDisabled || disabledKeys.has(norm);
+        });
+
+        if (isAnyRevoked) {
+          return res.json({ isUnlocked: false, isRevoked: true, reason: 'disabled_key' });
+        }
+
+        return res.json({ isUnlocked: true });
+      }
     }
 
-    return res.json({ isUnlocked: true });
+    // 4. If activeKey is provided and is a valid key that has not been disabled
+    if (activeKey && NORMALIZED_VALID_KEYS_MAP.has(activeKey)) {
+      return res.json({ isUnlocked: true });
+    }
+
+    return res.json({ isUnlocked: false });
   });
 
   // ================= ADMIN API (Protected by password "broisgoofy") =================
@@ -437,7 +452,37 @@ export function setupApiRoutes(app: express.Express) {
     return res.status(401).json({ success: false, message: 'Invalid password' });
   });
 
-  // Admin: Get all keys data (redeemed keys & disabled keys)
+  // Client / Admin: Sync device active key to server records
+  router.post('/admin/sync-active-device', (req: Request, res: Response) => {
+    const rawKey = String(req.body?.key || '').trim();
+    const deviceId = String(req.body?.deviceId || '').trim();
+    const normKey = normalizeKey(rawKey);
+
+    if (!normKey || !deviceId) {
+      return res.json({ success: false });
+    }
+
+    const canonicalKey = NORMALIZED_VALID_KEYS_MAP.get(normKey) || normKey;
+    const disabledKeys = loadDisabledKeys();
+
+    if (disabledKeys.has(normKey) || disabledKeys.has(normalizeKey(canonicalKey))) {
+      return res.json({ success: false, isDisabled: true, isRevoked: true });
+    }
+
+    const redeemed = loadRedeemedKeys();
+    if (!redeemed[normKey] && !redeemed[canonicalKey]) {
+      redeemed[normKey] = {
+        deviceId,
+        redeemedAt: new Date().toISOString(),
+        isDisabled: false,
+      };
+      saveRedeemedKeys(redeemed);
+    }
+
+    return res.json({ success: true, isUnlocked: true });
+  });
+
+  // Admin: Get all keys data (catalog of 500 keys, redeemed keys & disabled keys)
   router.post('/admin/keys', (req: Request, res: Response) => {
     const password = String(req.body?.password || '');
     if (password !== ADMIN_PASSWORD) {
@@ -459,7 +504,9 @@ export function setupApiRoutes(app: express.Express) {
       if (!seen.has(norm)) {
         seen.add(norm);
         const canonical = NORMALIZED_VALID_KEYS_MAP.get(norm) || key;
-        const isDisabled = Boolean(val.isDisabled || disabledKeys.includes(norm) || disabledKeys.includes(normalizeKey(canonical)));
+        const isDisabled = Boolean(
+          val.isDisabled || disabledKeys.includes(norm) || disabledKeys.includes(normalizeKey(canonical))
+        );
         redeemedList.push({
           key: canonical,
           deviceId: val.deviceId,
@@ -469,11 +516,31 @@ export function setupApiRoutes(app: express.Express) {
       }
     }
 
+    // Build master catalog of all 500 keys with real-time status
+    const allKeys = VALID_KEYS.map((canonical) => {
+      const norm = normalizeKey(canonical);
+      const isDisabled = disabledKeys.includes(norm) || disabledKeys.includes(normalizeKey(canonical));
+      const red = redeemed[norm] || redeemed[canonical];
+      let status: 'available' | 'redeemed' | 'disabled' = 'available';
+      if (isDisabled) {
+        status = 'disabled';
+      } else if (red) {
+        status = 'redeemed';
+      }
+      return {
+        key: canonical,
+        status,
+        deviceId: red?.deviceId || null,
+        redeemedAt: red?.redeemedAt || null,
+      };
+    });
+
     return res.json({
       success: true,
       totalKeys: VALID_KEYS.length,
       redeemedKeys: redeemedList,
       disabledKeys,
+      allKeys,
     });
   });
 

@@ -18,7 +18,7 @@ import { KeyVerificationModal } from './components/KeyVerificationModal';
 import { AdminPanelModal } from './components/AdminPanelModal';
 import { CheckCircle2, Lock } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { isDeviceUnlocked, setDeviceUnlocked, verifyDeviceStatusWithServer } from './utils/device';
+import { isDeviceUnlocked, setDeviceUnlocked, verifyDeviceStatusWithServer, syncActiveKeyWithServer, getActiveKey, revokeDeviceUnlock } from './utils/device';
 
 export default function App() {
   // Balance management with persistent local storage - defaults to 10,000 matching user screenshots
@@ -50,16 +50,32 @@ export default function App() {
 
   const [toastMessage, setToastMessage] = useState<{ title: string; subtitle: string } | null>(null);
 
-  // Background server check for device unlock registration
+  // Background server check for device unlock registration and revocation
   useEffect(() => {
-    if (!isSendUnlocked) {
-      verifyDeviceStatusWithServer().then((unlocked) => {
-        if (unlocked) {
-          setIsSendUnlocked(true);
-        }
-      });
-    }
-  }, [isSendUnlocked]);
+    // Sync any locally stored active key with server so it's tracked in admin panel
+    syncActiveKeyWithServer();
+
+    // Verify status with server
+    verifyDeviceStatusWithServer().then((unlocked) => {
+      setIsSendUnlocked(unlocked);
+    });
+  }, []);
+
+  // Shortcut to open Admin Panel from anywhere (Ctrl+Shift+A or Alt+A)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (
+        (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'a') ||
+        (e.metaKey && e.shiftKey && e.key.toLowerCase() === 'a') ||
+        (e.altKey && e.key.toLowerCase() === 'a')
+      ) {
+        e.preventDefault();
+        setIsAdminModalOpen((prev) => !prev);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   // Sync balance to local storage
   useEffect(() => {
@@ -77,9 +93,11 @@ export default function App() {
     }, 4000);
   };
 
-  // Called when Send Robux button is clicked
-  const handleOpenSend = () => {
-    if (!isSendUnlocked) {
+  // Called when Send Robux button is clicked (verifies device has not been disabled by admin)
+  const handleOpenSend = async () => {
+    const unlocked = await verifyDeviceStatusWithServer();
+    setIsSendUnlocked(unlocked);
+    if (!unlocked) {
       setIsKeyModalOpen(true);
     } else {
       setIsSendModalOpen(true);
@@ -107,9 +125,12 @@ export default function App() {
   };
 
   // Called when a key is successfully validated
-  const handleKeySuccess = () => {
+  const handleKeySuccess = (canonicalKey?: string) => {
     setIsSendUnlocked(true);
-    setDeviceUnlocked('activated');
+    if (canonicalKey) {
+      setDeviceUnlocked(canonicalKey);
+      syncActiveKeyWithServer();
+    }
     setIsKeyModalOpen(false);
     setIsSendModalOpen(true);
     showToast('Key Activated!', 'Send Robux is now unlocked on this device.');
@@ -175,16 +196,17 @@ export default function App() {
           </div>
           <p>© 2026 Roblox Corporation. All rights reserved.</p>
 
-          {/* Discreet Admin Access Trigger placed at the really bottom only small */}
+          {/* Discreet Admin Access Trigger placed at the bottom */}
           <div className="pt-2 flex justify-center">
             <button
               type="button"
+              id="admin-footer-trigger"
               onClick={() => setIsAdminModalOpen(true)}
-              className="text-[10px] text-white/20 hover:text-white/60 transition-colors flex items-center gap-1 cursor-pointer select-none py-0.5 px-2 rounded hover:bg-white/[0.03]"
-              title="Admin Access"
+              className="text-[11px] text-white/30 hover:text-white/80 transition-colors flex items-center gap-1.5 cursor-pointer select-none py-1 px-3 rounded-md hover:bg-white/[0.05] border border-transparent hover:border-white/10"
+              title="Admin Access (Shortcut: Ctrl+Shift+A)"
             >
-              <Lock className="w-2.5 h-2.5 opacity-50" />
-              <span>Admin</span>
+              <Lock className="w-3 h-3 text-red-400/80" />
+              <span>Admin Panel</span>
             </button>
           </div>
         </footer>
@@ -194,9 +216,13 @@ export default function App() {
       <AdminPanelModal
         isOpen={isAdminModalOpen}
         onClose={() => setIsAdminModalOpen(false)}
-        onKeyDisabledOrRevoked={async () => {
+        onKeyDisabledOrRevoked={async (disabledKey) => {
           const unlocked = await verifyDeviceStatusWithServer();
           setIsSendUnlocked(unlocked);
+          if (!unlocked) {
+            setIsSendModalOpen(false);
+            showToast('Device Locked', `Key "${disabledKey}" is disabled.`);
+          }
         }}
       />
 
