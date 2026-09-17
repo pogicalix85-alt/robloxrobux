@@ -117,19 +117,19 @@ export function RobloxPlusHexagonIcon({ className = 'w-5 h-5', size }: IconProps
       xmlns="http://www.w3.org/2000/svg"
       className={`inline-block shrink-0 ${className}`}
       style={style}
-      aria-label="Roblox Plus"
+      aria-label="Send Robux"
     >
       <path
-        d="M12 2.5L20.5 7.4V16.6L12 21.5L3.5 16.6V7.4L12 2.5Z"
+        d="M12 2.6L20.14 7.3C20.67 7.6 21 8.18 21 8.8V15.2C21 15.82 20.67 16.4 20.14 16.7L12 21.4C11.47 21.71 10.81 21.71 10.28 21.4L2.14 16.7C1.61 16.4 1.28 15.82 1.28 15.2V8.8C1.28 8.18 1.61 7.6 2.14 7.3L10.28 2.6C10.81 2.29 11.47 2.29 12 2.6Z"
         stroke="currentColor"
-        strokeWidth="2"
+        strokeWidth="1.8"
         strokeLinecap="round"
         strokeLinejoin="round"
       />
       <path
-        d="M8.5 18V6.5H14.5C16.1569 6.5 17.5 7.84315 17.5 9.5C17.5 11.1569 16.1569 12.5 14.5 12.5H8.5"
+        d="M8.5 17V7H13.2C15.1 7 16.5 8.35 16.5 10C16.5 11.65 15.1 13 13.2 13H8.5"
         stroke="currentColor"
-        strokeWidth="2"
+        strokeWidth="1.8"
         strokeLinecap="round"
         strokeLinejoin="round"
       />

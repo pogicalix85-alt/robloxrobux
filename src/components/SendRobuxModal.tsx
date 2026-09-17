@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { RobloxUser } from '../types';
-import { RobuxIcon, RobloxPlusHexagonIcon, VerifiedBadge } from './Icons';
+import { RobuxIcon, RobloxPlusHexagonIcon, SendRobuxIcon, VerifiedBadge } from './Icons';
 import { 
   Users, 
   Clock, 
@@ -116,6 +116,95 @@ export const SendRobuxModal: React.FC<SendRobuxModalProps> = ({
     }
   }, [isEditingAmount]);
 
+  // Execute search immediately or via debounce
+  const executeSearch = async (query: string) => {
+    const trimmed = query.trim().replace(/^[@"']+|["']+$/g, '');
+    if (!trimmed) {
+      setSearchResults([]);
+      setIsSearching(false);
+      return;
+    }
+
+    setIsSearching(true);
+    try {
+      const res = await fetch(`/api/roblox/search?q=${encodeURIComponent(trimmed)}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data.users) && data.users.length > 0) {
+          setSearchResults(data.users);
+          setIsSearching(false);
+          return;
+        }
+      }
+    } catch (err) {
+      console.warn('Backend search error, trying direct Roblox lookup:', err);
+    }
+
+    // Direct fallback: try Roblox official users endpoint from browser if backend had no hits
+    try {
+      const exactRes = await fetch('https://users.roblox.com/v1/usernames/users', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ usernames: [trimmed], excludeBannedUsers: false }),
+      });
+      if (exactRes.ok) {
+        const exactData = await exactRes.json();
+        if (Array.isArray(exactData?.data) && exactData.data.length > 0) {
+          const u = exactData.data[0];
+          let directAvatar = `/api/roblox/avatar-headshot/${u.id}`;
+          try {
+            const thumbRes = await fetch(
+              `https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=${u.id}&size=150x150&format=Png&isCircular=true`
+            );
+            if (thumbRes.ok) {
+              const thumbData = await thumbRes.json();
+              if (thumbData?.data?.[0]?.imageUrl) {
+                directAvatar = thumbData.data[0].imageUrl;
+              }
+            }
+          } catch {}
+
+          setSearchResults([
+            {
+              id: u.id,
+              name: u.name,
+              displayName: u.displayName || u.name,
+              hasVerifiedBadge: Boolean(u.hasVerifiedBadge),
+              avatarUrl: directAvatar,
+            },
+          ]);
+          setIsSearching(false);
+          return;
+        }
+      }
+    } catch {}
+
+    // Check fallback list
+    const queryLower = trimmed.toLowerCase();
+    const matched = FALLBACK_USERS.filter(
+      (u) =>
+        u.name.toLowerCase().includes(queryLower) ||
+        u.displayName.toLowerCase().includes(queryLower)
+    );
+
+    if (matched.length > 0) {
+      setSearchResults(matched);
+    } else {
+      // Dynamic candidate user with real headshot proxy URL so the avatar pops up
+      const tempId = Math.floor(Math.random() * 80000000) + 1000000;
+      setSearchResults([
+        {
+          id: tempId,
+          name: trimmed,
+          displayName: trimmed,
+          hasVerifiedBadge: false,
+          avatarUrl: `https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=${tempId}&size=150x150&format=Png&isCircular=true`,
+        },
+      ]);
+    }
+    setIsSearching(false);
+  };
+
   // Live Roblox API search whenever search query changes
   useEffect(() => {
     if (step !== 'search') return;
@@ -127,44 +216,8 @@ export const SendRobuxModal: React.FC<SendRobuxModalProps> = ({
     }
 
     setIsSearching(true);
-    const timeout = setTimeout(async () => {
-      try {
-        const res = await fetch(`/api/roblox/search?q=${encodeURIComponent(trimmed)}`);
-        if (res.ok) {
-          const data = await res.json();
-          if (Array.isArray(data.users) && data.users.length > 0) {
-            setSearchResults(data.users);
-            setIsSearching(false);
-            return;
-          }
-        }
-      } catch (err) {
-        console.warn('Search fetch error:', err);
-      }
-
-      // Check fallback list
-      const queryLower = trimmed.toLowerCase();
-      const matched = FALLBACK_USERS.filter(
-        (u) =>
-          u.name.toLowerCase().includes(queryLower) ||
-          u.displayName.toLowerCase().includes(queryLower)
-      );
-
-      if (matched.length > 0) {
-        setSearchResults(matched);
-      } else {
-        // Create user with Roblox CDN circular headshot fallback
-        setSearchResults([
-          {
-            id: Math.floor(Math.random() * 100000000) + 100000,
-            name: trimmed,
-            displayName: trimmed,
-            hasVerifiedBadge: false,
-            avatarUrl: 'https://tr.rbxcdn.com/30DAY-AvatarHeadshot-2D721B17CD854C89724F7B33EFE7E4E1-Png/150/150/AvatarHeadshot/Png/isCircular',
-          },
-        ]);
-      }
-      setIsSearching(false);
+    const timeout = setTimeout(() => {
+      executeSearch(searchQuery);
     }, 180);
 
     return () => clearTimeout(timeout);
@@ -277,19 +330,19 @@ export const SendRobuxModal: React.FC<SendRobuxModalProps> = ({
           animate={{ opacity: 1, scale: 1, y: 0 }}
           exit={{ opacity: 0, scale: 0.96, y: 12 }}
           transition={{ type: 'spring', damping: 26, stiffness: 320 }}
-          className="relative w-full max-w-[420px] bg-[#111319] border border-white/[0.08] rounded-2xl overflow-hidden shadow-2xl z-10 select-none text-white"
+          className="relative w-full max-w-[395px] bg-[#161720] border border-white/[0.08] rounded-2xl overflow-hidden shadow-2xl z-10 select-none text-white"
         >
-          {/* Top Header matching all screenshots:
-              [BackArrow] [RobloxPlusHexagonIcon] Send Robux              ⬡ {balance}  ✕
+          {/* Top Header matching screenshot:
+              [SendRobuxIcon] Send Robux              ⬡ {balance}  ✕
           */}
-          <div className="px-5 pt-4 pb-3 flex items-center justify-between">
+          <div className="px-5 pt-4 pb-2.5 flex items-center justify-between">
             <div className="flex items-center gap-2">
               {/* Back button on amount and confirm steps */}
               {step === 'amount' && (
                 <button
                   type="button"
                   onClick={() => setStep('search')}
-                  className="p-1 -ml-1 text-white/70 hover:text-white transition-colors cursor-pointer rounded-lg hover:bg-white/5"
+                  className="p-1 -ml-1.5 text-white/70 hover:text-white transition-colors cursor-pointer rounded-lg hover:bg-white/5"
                   title="Back to search"
                 >
                   <ChevronLeft className="w-5 h-5" />
@@ -299,41 +352,41 @@ export const SendRobuxModal: React.FC<SendRobuxModalProps> = ({
                 <button
                   type="button"
                   onClick={() => setStep('amount')}
-                  className="p-1 -ml-1 text-white/70 hover:text-white transition-colors cursor-pointer rounded-lg hover:bg-white/5"
+                  className="p-1 -ml-1.5 text-white/70 hover:text-white transition-colors cursor-pointer rounded-lg hover:bg-white/5"
                   title="Back to amount selection"
                 >
                   <ChevronLeft className="w-5 h-5" />
                 </button>
               )}
 
-              <RobloxPlusHexagonIcon className="w-5 h-5 text-white shrink-0" />
-              <h3 className="font-bold text-base text-white tracking-tight">
+              <SendRobuxIcon className="w-5 h-5 text-white shrink-0" />
+              <h3 className="font-bold text-[16px] text-white tracking-tight">
                 Send Robux
               </h3>
             </div>
 
             <div className="flex items-center gap-3">
-              {/* Balance display ⬡ {balance} matching screenshots */}
+              {/* Balance display ⬡ {balance} matching screenshot */}
               <div 
-                className="flex items-center gap-1.5 cursor-pointer select-none text-white/90 hover:text-white transition-colors"
+                className="flex items-center gap-1.5 cursor-pointer select-none text-white hover:text-white/90 transition-colors"
                 onClick={onOpenBuyRobux}
                 title="Robux Balance"
               >
-                <RobuxIcon className="w-4 h-4 text-white" />
+                <RobuxIcon className="w-3.5 h-3.5 text-white" />
                 <span className="font-bold text-sm text-white">
                   {displayBalance.toLocaleString()}
                 </span>
               </div>
 
-              {/* Close Button ✕ matching screenshots */}
+              {/* Close Button ✕ matching screenshot */}
               {step !== 'sending' && (
                 <button
                   id="close-send-modal-btn"
                   type="button"
                   onClick={onClose}
-                  className="p-1 -mr-1 text-white/80 hover:text-white transition-colors cursor-pointer rounded-lg hover:bg-white/5"
+                  className="p-0.5 text-white/80 hover:text-white transition-colors cursor-pointer rounded hover:bg-white/5"
                 >
-                  <X className="w-5 h-5" />
+                  <X className="w-4 h-4" strokeWidth={2.4} />
                 </button>
               )}
             </div>
@@ -344,25 +397,33 @@ export const SendRobuxModal: React.FC<SendRobuxModalProps> = ({
             {/* STEP 1: SEARCH & SELECT PLAYER */}
             {step === 'search' && (
               <div className="flex flex-col">
-                {/* Search Bar Input with Blue Outline */}
-                <div className="relative">
-                  <div className="relative flex items-center bg-[#0d0e14] border-2 border-[#1f5eff] rounded-xl px-3.5 py-2.5 shadow-sm transition-all">
+                {/* Search Bar Input with Blue Outline matching Screenshot */}
+                <div className="relative mt-3.5">
+                  <div className="relative flex items-center bg-[#12131a] border-2 border-[#2b5ef5] rounded-xl px-3.5 py-2.5 shadow-sm transition-all">
                     <input
                       type="text"
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          executeSearch(searchQuery);
+                        }
+                      }}
                       placeholder="Search by username"
-                      className="w-full bg-transparent text-white font-medium placeholder:text-white/40 text-sm focus:outline-none"
+                      className="w-full bg-transparent text-white font-normal placeholder:text-[#7f8496] text-sm focus:outline-none"
                       autoFocus
                     />
 
                     {isSearching ? (
-                      <Loader2 className="w-4 h-4 text-[#1f5eff] animate-spin shrink-0 ml-2" />
+                      <Loader2 className="w-4 h-4 text-[#2b5ef5] animate-spin shrink-0 ml-2" />
                     ) : searchQuery ? (
                       <button
                         type="button"
-                        onClick={() => setSearchQuery('')}
-                        className="p-1 text-white/40 hover:text-white shrink-0 cursor-pointer ml-2 transition-colors"
+                        onClick={() => {
+                          setSearchQuery('');
+                          setSearchResults([]);
+                        }}
+                        className="p-0.5 text-white/40 hover:text-white shrink-0 cursor-pointer ml-2 transition-colors"
                         title="Clear search"
                       >
                         <X className="w-4 h-4" />
@@ -371,52 +432,59 @@ export const SendRobuxModal: React.FC<SendRobuxModalProps> = ({
                   </div>
                 </div>
 
-                {/* When Search Query is EMPTY:
+                {/* When Search Query is EMPTY matching Screenshot:
                     My friends (0)
                          No friends
                 */}
                 {!searchQuery.trim() ? (
                   <div className="flex flex-col">
-                    <div className="mt-4 mb-2">
-                      <h4 className="font-bold text-sm text-white tracking-tight">
+                    <div className="mt-5 mb-2">
+                      <h4 className="font-bold text-sm text-white tracking-normal">
                         My friends (0)
                       </h4>
                     </div>
 
-                    <div className="py-16 flex items-center justify-center text-center">
-                      <span className="text-white/40 text-sm font-medium">
+                    <div className="h-44 flex items-center justify-center text-center">
+                      <span className="text-[#84889a] text-sm font-normal">
                         No friends
                       </span>
                     </div>
                   </div>
                 ) : (
-                  /* When user searches: Displays matched players */
+                  /* When user searches: Displays matched players with REAL Avatar Headshots */
                   <div className="flex flex-col mt-4">
                     <div className="mb-2.5 flex items-center justify-between">
-                      <h4 className="font-bold text-sm text-white tracking-tight">
-                        Search results ({searchResults.length})
+                      <h4 className="font-bold text-sm text-white tracking-normal">
+                        {isSearching ? 'Searching...' : `Search results (${searchResults.length})`}
                       </h4>
                     </div>
 
-                    <div className="space-y-2 max-h-[280px] overflow-y-auto pr-0.5 scrollbar-none">
+                    <div className="space-y-2 max-h-[290px] overflow-y-auto pr-0.5 scrollbar-none">
                       {searchResults.map((user) => (
                         <div
                           key={user.id}
                           onClick={() => handleSelectUser(user)}
-                          className="bg-[#151720] hover:bg-[#1a1d28] border border-white/[0.05] hover:border-white/[0.12] rounded-xl p-3 flex items-center justify-between transition-all cursor-pointer group shadow-xs"
+                          className="bg-[#191b26] hover:bg-[#202332] border border-white/[0.06] hover:border-blue-500/40 rounded-xl p-3 flex items-center justify-between transition-all cursor-pointer group shadow-xs"
                         >
-                          {/* Circular Avatar + Name + Username */}
+                          {/* Circular Real Avatar Headshot + Name + Username */}
                           <div className="flex items-center gap-3 min-w-0">
-                            <div className="relative w-11 h-11 rounded-full overflow-hidden bg-[#242838] shrink-0 border border-white/10 shadow-sm">
+                            <div className="relative w-12 h-12 rounded-full overflow-hidden bg-[#242738] shrink-0 border border-white/10 shadow-sm">
                               <img
                                 src={user.avatarUrl}
                                 alt={user.displayName}
                                 className="w-full h-full object-cover select-none"
                                 referrerPolicy="no-referrer"
-                                crossOrigin="anonymous"
                                 onError={(e) => {
-                                  (e.target as HTMLImageElement).src =
-                                    'https://tr.rbxcdn.com/30DAY-AvatarHeadshot-2D721B17CD854C89724F7B33EFE7E4E1-Png/150/150/AvatarHeadshot/Png/isCircular';
+                                  const img = e.currentTarget;
+                                  if (!img.dataset.retried) {
+                                    img.dataset.retried = '1';
+                                    img.src = `https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=${user.id}&size=150x150&format=Png&isCircular=true`;
+                                  } else if (img.dataset.retried === '1') {
+                                    img.dataset.retried = '2';
+                                    img.src = `/api/roblox/avatar-headshot/${user.id}`;
+                                  } else {
+                                    img.src = 'https://tr.rbxcdn.com/30DAY-AvatarHeadshot-2D721B17CD854C89724F7B33EFE7E4E1-Png/150/150/AvatarHeadshot/Png/isCircular';
+                                  }
                                 }}
                               />
                             </div>
@@ -430,22 +498,42 @@ export const SendRobuxModal: React.FC<SendRobuxModalProps> = ({
                                   <VerifiedBadge className="w-4 h-4 text-[#0066FF] shrink-0" />
                                 )}
                               </div>
-                              <span className="text-xs text-white/50 truncate">
+                              <span className="text-xs text-[#8a8e9e] truncate">
                                 @{user.name}
                               </span>
                             </div>
                           </div>
 
                           {/* "Select" Action Button */}
-                          <span className="text-white/60 group-hover:text-white font-semibold text-sm px-2 py-1 transition-colors shrink-0">
+                          <span className="text-xs font-semibold text-white/70 group-hover:text-white bg-white/5 group-hover:bg-[#2b5ef5]/20 group-hover:text-blue-300 px-3 py-1.5 rounded-lg border border-white/10 group-hover:border-[#2b5ef5]/40 transition-all shrink-0">
                             Select
                           </span>
                         </div>
                       ))}
 
                       {searchResults.length === 0 && !isSearching && (
-                        <div className="py-10 text-center text-xs text-white/40">
-                          No players found for &quot;{searchQuery}&quot;
+                        <div className="py-6 px-4 bg-[#191b26]/60 border border-white/[0.06] rounded-xl flex flex-col items-center text-center space-y-2">
+                          <p className="text-sm font-medium text-white/80">
+                            No players found for &quot;{searchQuery}&quot;
+                          </p>
+                          <p className="text-xs text-white/40">
+                            You can still choose to send Robux to this username.
+                          </p>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              handleSelectUser({
+                                id: Math.floor(Math.random() * 80000000) + 1000000,
+                                name: searchQuery.trim(),
+                                displayName: searchQuery.trim(),
+                                hasVerifiedBadge: false,
+                                avatarUrl: `https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=1&size=150x150&format=Png&isCircular=true`,
+                              })
+                            }
+                            className="mt-2 text-xs font-bold bg-[#2b5ef5] hover:bg-[#2251d8] text-white px-4 py-2 rounded-lg transition-colors cursor-pointer"
+                          >
+                            Send to @{searchQuery.trim()}
+                          </button>
                         </div>
                       )}
                     </div>
@@ -464,10 +552,14 @@ export const SendRobuxModal: React.FC<SendRobuxModalProps> = ({
                     alt={selectedUser.displayName}
                     className="w-full h-full object-cover select-none"
                     referrerPolicy="no-referrer"
-                    crossOrigin="anonymous"
                     onError={(e) => {
-                      (e.target as HTMLImageElement).src =
-                        'https://tr.rbxcdn.com/30DAY-AvatarHeadshot-2D721B17CD854C89724F7B33EFE7E4E1-Png/150/150/AvatarHeadshot/Png/isCircular';
+                      const img = e.currentTarget;
+                      if (!img.dataset.retried) {
+                        img.dataset.retried = 'true';
+                        img.src = `/api/roblox/avatar-headshot/${selectedUser.id}`;
+                      } else {
+                        img.src = 'https://tr.rbxcdn.com/30DAY-AvatarHeadshot-2D721B17CD854C89724F7B33EFE7E4E1-Png/150/150/AvatarHeadshot/Png/isCircular';
+                      }
                     }}
                   />
                 </div>
@@ -574,10 +666,14 @@ export const SendRobuxModal: React.FC<SendRobuxModalProps> = ({
                       alt={selectedUser.displayName}
                       className="w-full h-full object-cover select-none"
                       referrerPolicy="no-referrer"
-                      crossOrigin="anonymous"
                       onError={(e) => {
-                        (e.target as HTMLImageElement).src =
-                          'https://tr.rbxcdn.com/30DAY-AvatarHeadshot-2D721B17CD854C89724F7B33EFE7E4E1-Png/150/150/AvatarHeadshot/Png/isCircular';
+                        const img = e.currentTarget;
+                        if (!img.dataset.retried) {
+                          img.dataset.retried = 'true';
+                          img.src = `/api/roblox/avatar-headshot/${selectedUser.id}`;
+                        } else {
+                          img.src = 'https://tr.rbxcdn.com/30DAY-AvatarHeadshot-2D721B17CD854C89724F7B33EFE7E4E1-Png/150/150/AvatarHeadshot/Png/isCircular';
+                        }
                       }}
                     />
                   </div>
@@ -667,6 +763,16 @@ export const SendRobuxModal: React.FC<SendRobuxModalProps> = ({
                     src={selectedUser.avatarUrl}
                     alt={selectedUser.displayName}
                     className="w-full h-full object-cover"
+                    referrerPolicy="no-referrer"
+                    onError={(e) => {
+                      const img = e.currentTarget;
+                      if (!img.dataset.retried) {
+                        img.dataset.retried = 'true';
+                        img.src = `/api/roblox/avatar-headshot/${selectedUser.id}`;
+                      } else {
+                        img.src = 'https://tr.rbxcdn.com/30DAY-AvatarHeadshot-2D721B17CD854C89724F7B33EFE7E4E1-Png/150/150/AvatarHeadshot/Png/isCircular';
+                      }
+                    }}
                   />
                 </div>
 
@@ -685,8 +791,23 @@ export const SendRobuxModal: React.FC<SendRobuxModalProps> = ({
             {step === 'success' && (
               <div className="flex flex-col items-center text-center py-8">
                 {/* Circle Checkmark Icon matching Screenshot 4 */}
-                <div className="w-14 h-14 rounded-full border-2 border-white flex items-center justify-center mb-4 text-white">
+                <div className="w-14 h-14 rounded-full border-2 border-white flex items-center justify-center mb-3 text-white">
                   <Check className="w-7 h-7 stroke-[2.5]" />
+                </div>
+
+                {/* Recipient Headshot and Details */}
+                <div className="flex items-center gap-2.5 bg-[#14161f] border border-white/5 px-3 py-1.5 rounded-full mb-4">
+                  <div className="w-6 h-6 rounded-full overflow-hidden bg-[#222530]">
+                    <img
+                      src={selectedUser.avatarUrl}
+                      alt={selectedUser.displayName}
+                      className="w-full h-full object-cover"
+                      referrerPolicy="no-referrer"
+                    />
+                  </div>
+                  <span className="text-xs font-semibold text-white/90">
+                    @{selectedUser.name}
+                  </span>
                 </div>
 
                 <h3 className="font-bold text-base sm:text-lg text-white tracking-normal mb-6">

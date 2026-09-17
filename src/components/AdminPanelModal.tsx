@@ -19,6 +19,7 @@ import {
   Smartphone,
   ListFilter,
   ArrowRight,
+  History,
 } from 'lucide-react';
 import { normalizeKey, NORMALIZED_VALID_KEYS_MAP, VALID_KEYS } from '../data/validKeys';
 import {
@@ -29,13 +30,24 @@ import {
   revokeDeviceUnlock,
   addDisabledKeyLocally,
   removeDisabledKeyLocally,
+  getLocallyRedeemedKeys,
 } from '../utils/device';
 
-interface RedeemedKeyItem {
+export interface RedeemedKeyItem {
   key: string;
   deviceId: string;
   redeemedAt: string;
   isDisabled: boolean;
+}
+
+export interface RedeemedHistoryItem {
+  key: string;
+  normalizedKey?: string;
+  deviceId: string;
+  redeemedAt: string;
+  firstRedeemedAt?: string;
+  redemptionCount?: number;
+  status: 'active' | 'disabled' | 'cleared';
 }
 
 interface KeyCatalogItem {
@@ -43,6 +55,8 @@ interface KeyCatalogItem {
   status: 'available' | 'redeemed' | 'disabled';
   deviceId?: string | null;
   redeemedAt?: string | null;
+  wasRedeemedBefore?: boolean;
+  redemptionCount?: number;
 }
 
 interface AdminPanelModalProps {
@@ -80,6 +94,8 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
 
   // Loaded data from backend
   const [redeemedKeys, setRedeemedKeys] = useState<RedeemedKeyItem[]>([]);
+  const [allRedeemedHistory, setAllRedeemedHistory] = useState<RedeemedHistoryItem[]>([]);
+  const [totalRedeemedBefore, setTotalRedeemedBefore] = useState<number>(0);
   const [disabledKeys, setDisabledKeys] = useState<string[]>([]);
   const [catalogKeys, setCatalogKeys] = useState<KeyCatalogItem[]>([]);
   const [totalValidCount, setTotalValidCount] = useState<number>(VALID_KEYS.length);
@@ -88,7 +104,9 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
   // Search & Filters
   const [searchFilter, setSearchFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'available' | 'redeemed' | 'disabled'>('all');
+  const [redeemedSubFilter, setRedeemedSubFilter] = useState<'all' | 'active' | 'disabled' | 'cleared'>('all');
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  const [copiedAllRedeemed, setCopiedAllRedeemed] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const PAGE_SIZE = 25;
 
@@ -103,9 +121,32 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
     setCurrentIsUnlocked(isDeviceUnlocked());
   };
 
-  // Fetch admin keys data from backend
-  const fetchAdminData = async () => {
-    setIsDataLoading(true);
+  // Sync client local storage redeemed history with server permanent registry
+  const syncLocalHistoryWithServer = async () => {
+    try {
+      const localHistory = getLocallyRedeemedKeys();
+      if (localHistory.length > 0) {
+        const res = await fetch('/api/admin/sync-history', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password: ADMIN_PASSWORD, clientHistory: localHistory }),
+        });
+        if (res.ok) {
+          const d = await res.json();
+          if (d?.allRedeemedHistory && Array.isArray(d.allRedeemedHistory)) {
+            setAllRedeemedHistory(d.allRedeemedHistory);
+            setTotalRedeemedBefore(d.totalRedeemedBefore || d.allRedeemedHistory.length);
+          }
+        }
+      }
+    } catch {
+      //
+    }
+  };
+
+  // Fetch admin keys data from backend (with silent background polling support)
+  const fetchAdminData = async (silent: boolean = false) => {
+    if (!silent) setIsDataLoading(true);
     refreshLocalDeviceState();
     try {
       const res = await fetch('/api/admin/keys', {
@@ -119,6 +160,10 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
         if (data.success) {
           setRedeemedKeys(data.redeemedKeys || []);
           setDisabledKeys(data.disabledKeys || []);
+          if (data.allRedeemedHistory && Array.isArray(data.allRedeemedHistory)) {
+            setAllRedeemedHistory(data.allRedeemedHistory);
+            setTotalRedeemedBefore(data.totalRedeemedBefore || data.allRedeemedHistory.length);
+          }
           if (data.allKeys && Array.isArray(data.allKeys)) {
             setCatalogKeys(data.allKeys);
           }
@@ -126,18 +171,25 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
         }
       }
     } catch (err) {
-      console.error('Failed to load admin data:', err);
+      if (!silent) console.error('Failed to load admin data:', err);
     } finally {
-      setIsDataLoading(false);
+      if (!silent) setIsDataLoading(false);
     }
   };
 
   useEffect(() => {
-    if (isOpen) {
-      refreshLocalDeviceState();
-      if (isAuthenticated) {
-        fetchAdminData();
-      }
+    if (!isOpen) return;
+    refreshLocalDeviceState();
+    if (isAuthenticated) {
+      syncLocalHistoryWithServer();
+      fetchAdminData(false);
+
+      // Auto-poll every 2.5 seconds for live real-time sync with server & other devices
+      const interval = setInterval(() => {
+        fetchAdminData(true);
+      }, 2500);
+
+      return () => clearInterval(interval);
     }
   }, [isOpen, isAuthenticated]);
 
@@ -152,6 +204,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
       } catch {
         // Ignored
       }
+      syncLocalHistoryWithServer();
       fetchAdminData();
     } else {
       setPasswordError('Incorrect password. Access denied.');
@@ -341,12 +394,105 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
     setTimeout(() => setCopiedKey(null), 1500);
   };
 
-  // Filtered lists based on search
-  const filteredRedeemed = redeemedKeys.filter(
-    (item) =>
-      item.key.toLowerCase().includes(searchFilter.toLowerCase()) ||
-      item.deviceId.toLowerCase().includes(searchFilter.toLowerCase())
-  );
+  // Combine all server permanent redemption history, active redeemed keys, and local device records
+  const combinedRedeemedList = useMemo(() => {
+    const map = new Map<string, RedeemedHistoryItem>();
+
+    // 1. All historical records from server permanent registry
+    allRedeemedHistory.forEach((h) => {
+      const norm = normalizeKey(h.key);
+      const isDis = Boolean(
+        h.status === 'disabled' ||
+        disabledKeys.some((d) => normalizeKey(d) === norm)
+      );
+      map.set(norm, {
+        ...h,
+        status: isDis ? 'disabled' : h.status,
+      });
+    });
+
+    // 2. All active redeemed keys from server
+    redeemedKeys.forEach((r) => {
+      const norm = normalizeKey(r.key);
+      const isDis = Boolean(
+        r.isDisabled ||
+        disabledKeys.some((d) => normalizeKey(d) === norm)
+      );
+      if (!map.has(norm)) {
+        map.set(norm, {
+          key: r.key,
+          normalizedKey: norm,
+          deviceId: r.deviceId,
+          redeemedAt: r.redeemedAt,
+          firstRedeemedAt: r.redeemedAt,
+          redemptionCount: 1,
+          status: isDis ? 'disabled' : 'active',
+        });
+      } else {
+        const existing = map.get(norm)!;
+        map.set(norm, {
+          ...existing,
+          deviceId: r.deviceId || existing.deviceId,
+          redeemedAt: r.redeemedAt || existing.redeemedAt,
+          status: isDis ? 'disabled' : 'active',
+        });
+      }
+    });
+
+    // 3. Any local device history to guarantee zero loss
+    getLocallyRedeemedKeys().forEach((l) => {
+      const norm = normalizeKey(l.key);
+      if (!map.has(norm)) {
+        map.set(norm, {
+          key: l.key,
+          normalizedKey: norm,
+          deviceId: l.deviceId,
+          redeemedAt: l.redeemedAt,
+          firstRedeemedAt: l.redeemedAt,
+          redemptionCount: 1,
+          status: disabledKeys.some((d) => normalizeKey(d) === norm) ? 'disabled' : 'active',
+        });
+      }
+    });
+
+    return Array.from(map.values()).sort(
+      (a, b) => new Date(b.redeemedAt).getTime() - new Date(a.redeemedAt).getTime()
+    );
+  }, [allRedeemedHistory, redeemedKeys, disabledKeys]);
+
+  // Filtered redeemed list based on search and sub-filter
+  const filteredRedeemed = useMemo(() => {
+    let list = combinedRedeemedList;
+    if (searchFilter.trim()) {
+      const q = searchFilter.toLowerCase();
+      const qNorm = normalizeKey(q);
+      list = list.filter(
+        (item) =>
+          item.key.toLowerCase().includes(q) ||
+          (item.normalizedKey && item.normalizedKey.includes(qNorm)) ||
+          normalizeKey(item.key).includes(qNorm) ||
+          (item.deviceId && item.deviceId.toLowerCase().includes(q))
+      );
+    }
+    if (redeemedSubFilter === 'active') {
+      list = list.filter((item) => item.status === 'active');
+    } else if (redeemedSubFilter === 'disabled') {
+      list = list.filter((item) => item.status === 'disabled');
+    } else if (redeemedSubFilter === 'cleared') {
+      list = list.filter((item) => item.status === 'cleared');
+    }
+    return list;
+  }, [combinedRedeemedList, searchFilter, redeemedSubFilter]);
+
+  const handleCopyAllRedeemed = () => {
+    if (combinedRedeemedList.length === 0) return;
+    const text = combinedRedeemedList
+      .map((item) => `${item.key}  [Status: ${item.status}, Device: ${item.deviceId}, Redeemed: ${item.redeemedAt}]`)
+      .join('\n');
+    navigator.clipboard.writeText(text);
+    setCopiedAllRedeemed(true);
+    setTimeout(() => setCopiedAllRedeemed(false), 2000);
+  };
 
   const filteredDisabled = disabledKeys.filter((k) =>
     k.toLowerCase().includes(searchFilter.toLowerCase())
@@ -360,15 +506,17 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
       list = VALID_KEYS.map((k) => {
         const norm = normalizeKey(k);
         const isDisabled = disabledKeys.some((d) => normalizeKey(d) === norm);
-        const red = redeemedKeys.find((r) => normalizeKey(r.key) === norm);
+        const redHist = combinedRedeemedList.find((r) => normalizeKey(r.key) === norm);
         let status: 'available' | 'redeemed' | 'disabled' = 'available';
         if (isDisabled) status = 'disabled';
-        else if (red) status = 'redeemed';
+        else if (redHist && redHist.status === 'active') status = 'redeemed';
         return {
           key: k,
           status,
-          deviceId: red?.deviceId,
-          redeemedAt: red?.redeemedAt,
+          deviceId: redHist?.deviceId,
+          redeemedAt: redHist?.redeemedAt,
+          wasRedeemedBefore: Boolean(redHist),
+          redemptionCount: redHist?.redemptionCount || (redHist ? 1 : 0),
         };
       });
     }
@@ -385,11 +533,15 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
     }
 
     if (statusFilter !== 'all') {
-      list = list.filter((item) => item.status === statusFilter);
+      if (statusFilter === 'redeemed') {
+        list = list.filter((item) => item.status === 'redeemed' || item.wasRedeemedBefore);
+      } else {
+        list = list.filter((item) => item.status === statusFilter);
+      }
     }
 
     return list;
-  }, [catalogKeys, disabledKeys, redeemedKeys, searchFilter, statusFilter]);
+  }, [catalogKeys, disabledKeys, combinedRedeemedList, searchFilter, statusFilter]);
 
   const totalCatalogPages = Math.ceil(catalogList.length / PAGE_SIZE) || 1;
   const paginatedCatalog = catalogList.slice(
@@ -424,9 +576,15 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
               <div className="flex items-center gap-2">
                 <h3 className="text-base font-bold text-white tracking-wide">Admin Key Panel</h3>
                 {isAuthenticated && (
-                  <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
-                    Authorized
-                  </span>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                      Authorized
+                    </span>
+                    <span className="flex items-center gap-1 text-[10px] font-semibold text-emerald-400 bg-emerald-950/60 border border-emerald-500/30 px-2 py-0.5 rounded-full">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                      LIVE (2.5s Sync)
+                    </span>
+                  </div>
                 )}
               </div>
               <p className="text-xs text-white/50">Manage key validation, revocation, and device lockouts</p>
@@ -435,16 +593,28 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
 
           <div className="flex items-center gap-2">
             {isAuthenticated && (
-              <button
-                type="button"
-                id="admin-logout-button"
-                onClick={handleLogout}
-                title="Lock Admin Panel"
-                className="p-2 rounded-lg bg-white/5 hover:bg-white/10 text-white/60 hover:text-white transition-colors text-xs flex items-center gap-1.5"
-              >
-                <LogOut className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">Lock</span>
-              </button>
+              <>
+                <button
+                  type="button"
+                  id="admin-sync-header-btn"
+                  onClick={() => fetchAdminData(false)}
+                  title="Sync from server"
+                  className="p-2 rounded-lg bg-white/5 hover:bg-white/10 text-white/60 hover:text-white transition-colors text-xs flex items-center gap-1.5 cursor-pointer"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isDataLoading ? 'animate-spin text-emerald-400' : ''}`} />
+                  <span className="hidden sm:inline">Sync</span>
+                </button>
+                <button
+                  type="button"
+                  id="admin-logout-button"
+                  onClick={handleLogout}
+                  title="Lock Admin Panel"
+                  className="p-2 rounded-lg bg-white/5 hover:bg-white/10 text-white/60 hover:text-white transition-colors text-xs flex items-center gap-1.5"
+                >
+                  <LogOut className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Lock</span>
+                </button>
+              </>
             )}
             <button
               type="button"
@@ -505,17 +675,21 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
           /* Authenticated Admin Dashboard */
           <div className="flex-1 flex flex-col overflow-hidden">
             {/* Stats Summary Bar */}
-            <div className="grid grid-cols-3 gap-2 px-5 sm:px-6 py-2.5 bg-[#0d0e13] border-b border-white/[0.06] text-xs">
+            <div className="grid grid-cols-4 gap-2 px-5 sm:px-6 py-2.5 bg-[#0d0e13] border-b border-white/[0.06] text-xs">
               <div className="flex flex-col">
-                <span className="text-white/40 text-[11px]">Total Master Keys</span>
+                <span className="text-white/40 text-[10px] sm:text-[11px]">Total Master Keys</span>
                 <span className="text-sm font-bold text-white mt-0.5">{totalValidCount}</span>
               </div>
               <div className="flex flex-col">
-                <span className="text-white/40 text-[11px]">Redeemed Keys</span>
-                <span className="text-sm font-bold text-amber-400 mt-0.5">{redeemedKeys.length}</span>
+                <span className="text-white/40 text-[10px] sm:text-[11px]">Redeemed Before</span>
+                <span className="text-sm font-bold text-amber-400 mt-0.5">{totalRedeemedBefore || combinedRedeemedList.length}</span>
               </div>
               <div className="flex flex-col">
-                <span className="text-white/40 text-[11px]">Disabled / Blocked</span>
+                <span className="text-white/40 text-[10px] sm:text-[11px]">Active Unlocked</span>
+                <span className="text-sm font-bold text-emerald-400 mt-0.5">{combinedRedeemedList.filter((i) => i.status === 'active').length}</span>
+              </div>
+              <div className="flex flex-col">
+                <span className="text-white/40 text-[10px] sm:text-[11px]">Disabled / Blocked</span>
                 <span className="text-sm font-bold text-red-400 mt-0.5">{disabledKeys.length}</span>
               </div>
             </div>
@@ -570,8 +744,8 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                       : 'text-white/60 hover:text-white hover:bg-white/5'
                   }`}
                 >
-                  <Key className="w-3.5 h-3.5" />
-                  <span>Redeemed ({redeemedKeys.length})</span>
+                  <History className="w-3.5 h-3.5" />
+                  <span>Redeemed ({totalRedeemedBefore || combinedRedeemedList.length})</span>
                 </button>
 
                 <button
@@ -769,53 +943,88 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                   </div>
                 </div>
 
-                {/* Quick actions for already redeemed keys */}
+                {/* Quick actions for all keys redeemed before */}
                 <div>
                   <div className="flex items-center justify-between mb-3">
-                    <h5 className="text-xs font-bold uppercase tracking-wider text-white/50">
-                      Recently Redeemed Keys ({redeemedKeys.length})
-                    </h5>
+                    <div>
+                      <h5 className="text-xs font-bold uppercase tracking-wider text-white/70 flex items-center gap-1.5">
+                        <History className="w-3.5 h-3.5 text-amber-400" />
+                        <span>All Keys Redeemed Before ({combinedRedeemedList.length})</span>
+                      </h5>
+                      <p className="text-[11px] text-white/40 mt-0.5">
+                        Every key ever redeemed across devices. Click Disable to revoke access instantly.
+                      </p>
+                    </div>
                     <button
                       type="button"
                       onClick={() => setActiveTab('redeemed')}
-                      className="text-xs text-red-400 hover:text-red-300 font-medium cursor-pointer"
+                      className="text-xs text-amber-400 hover:text-amber-300 font-semibold cursor-pointer flex items-center gap-1"
                     >
-                      View All Redeemed →
+                      <span>Full Audit Log</span>
+                      <ArrowRight className="w-3 h-3" />
                     </button>
                   </div>
 
-                  {redeemedKeys.length === 0 ? (
+                  {combinedRedeemedList.length === 0 ? (
                     <div className="bg-[#181a24]/50 border border-white/[0.04] rounded-xl p-6 text-center text-xs text-white/40">
                       No keys have been redeemed yet.
                     </div>
                   ) : (
-                    <div className="space-y-2">
-                      {redeemedKeys.slice(0, 5).map((item) => (
+                    <div className="max-h-80 overflow-y-auto space-y-2 pr-1">
+                      {combinedRedeemedList.map((item) => (
                         <div
                           key={item.key}
-                          className="bg-[#181a24] border border-white/[0.06] rounded-xl p-3 flex items-center justify-between gap-3 text-xs"
+                          className="bg-[#181a24] border border-white/[0.06] rounded-xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs hover:border-white/10 transition-colors"
                         >
-                          <div className="flex items-center gap-2 min-w-0">
-                            <span className="font-mono font-bold text-white/90 truncate">
-                              {item.key}
-                            </span>
-                            {item.isDisabled ? (
-                              <span className="px-2 py-0.5 rounded-md bg-red-500/20 text-red-400 border border-red-500/30 text-[10px] font-bold">
-                                Disabled
+                          <div className="flex flex-col gap-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="font-mono font-bold text-white text-xs sm:text-sm">
+                                {item.key}
                               </span>
-                            ) : (
-                              <span className="px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-[10px] font-bold">
-                                Active
-                              </span>
-                            )}
+                              <button
+                                type="button"
+                                onClick={() => copyToClipboard(item.key)}
+                                className="p-0.5 text-white/40 hover:text-white transition-colors cursor-pointer"
+                                title="Copy Key"
+                              >
+                                {copiedKey === item.key ? (
+                                  <Check className="w-3 h-3 text-emerald-400" />
+                                ) : (
+                                  <Copy className="w-3 h-3" />
+                                )}
+                              </button>
+                              {item.status === 'disabled' ? (
+                                <span className="px-2 py-0.5 rounded-md bg-red-500/20 text-red-400 border border-red-500/30 text-[10px] font-bold flex items-center gap-1">
+                                  <Ban className="w-2.5 h-2.5" />
+                                  <span>Disabled / Revoked</span>
+                                </span>
+                              ) : item.status === 'active' ? (
+                                <span className="px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-[10px] font-bold flex items-center gap-1">
+                                  <CheckCircle2 className="w-2.5 h-2.5" />
+                                  <span>Active & Unlocked</span>
+                                </span>
+                              ) : (
+                                <span className="px-2 py-0.5 rounded-md bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[10px] font-bold flex items-center gap-1">
+                                  <History className="w-2.5 h-2.5" />
+                                  <span>Redeemed Before</span>
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-[10px] text-white/40 flex items-center gap-2 flex-wrap">
+                              <span>Device: <code className="text-white/60">{item.deviceId}</code></span>
+                              {item.redeemedAt && (
+                                <span>• Redeemed: {new Date(item.redeemedAt).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}</span>
+                              )}
+                            </div>
                           </div>
 
-                          <div className="flex items-center gap-2 shrink-0">
-                            {item.isDisabled ? (
+                          <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
+                            {item.status === 'disabled' ? (
                               <button
                                 type="button"
                                 onClick={() => handleEnableKey(item.key)}
-                                className="px-2.5 py-1 rounded-lg bg-white/5 hover:bg-emerald-500/20 hover:text-emerald-300 text-white/70 text-[11px] font-medium transition-colors cursor-pointer"
+                                disabled={actionLoading}
+                                className="px-2.5 py-1 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 border border-emerald-500/20 text-[11px] font-semibold transition-colors cursor-pointer"
                               >
                                 Re-enable
                               </button>
@@ -823,7 +1032,8 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                               <button
                                 type="button"
                                 onClick={() => handleDisableKey(item.key)}
-                                className="px-2.5 py-1 rounded-lg bg-red-500/20 hover:bg-red-500/30 text-red-300 border border-red-500/30 text-[11px] font-medium transition-colors flex items-center gap-1 cursor-pointer"
+                                disabled={actionLoading}
+                                className="px-2.5 py-1 rounded-lg bg-red-500/20 hover:bg-red-500/30 text-red-300 border border-red-500/30 text-[11px] font-semibold transition-colors flex items-center gap-1 cursor-pointer"
                               >
                                 <Ban className="w-3 h-3" />
                                 <span>Disable</span>
@@ -1024,10 +1234,11 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
               </div>
             )}
 
-            {/* TAB 3: REDEEMED KEYS */}
+            {/* TAB 3: ALL REDEEMED KEYS HISTORY */}
             {activeTab === 'redeemed' && (
               <div className="flex-1 flex flex-col p-5 sm:p-6 overflow-hidden">
-                <div className="flex items-center gap-2 mb-4">
+                {/* Search & Actions Header */}
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 mb-3">
                   <div className="relative flex-1">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-white/30" />
                     <input
@@ -1035,17 +1246,93 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                       id="admin-search-redeemed"
                       value={searchFilter}
                       onChange={(e) => setSearchFilter(e.target.value)}
-                      placeholder="Search redeemed keys or device IDs..."
+                      placeholder="Search all redeemed keys, device IDs, or dates..."
                       className="w-full pl-9 pr-3 py-2 bg-[#0d0e13] border border-white/10 rounded-xl text-xs text-white placeholder:text-white/30 focus:outline-none focus:border-amber-500/40 font-mono"
                     />
                   </div>
+
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      id="admin-copy-all-redeemed"
+                      onClick={handleCopyAllRedeemed}
+                      disabled={combinedRedeemedList.length === 0}
+                      className="px-3 py-2 rounded-xl bg-white/5 hover:bg-white/10 disabled:opacity-40 disabled:cursor-not-allowed text-white/80 hover:text-white text-xs font-semibold transition-colors flex items-center gap-1.5 cursor-pointer border border-white/10"
+                      title="Copy all redeemed keys to clipboard"
+                    >
+                      {copiedAllRedeemed ? (
+                        <>
+                          <Check className="w-3.5 h-3.5 text-emerald-400" />
+                          <span className="text-emerald-300">Copied All!</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-3.5 h-3.5 text-amber-400" />
+                          <span>Copy All ({combinedRedeemedList.length})</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Sub-filter chips */}
+                <div className="flex items-center gap-1.5 mb-3 overflow-x-auto pb-1 text-xs">
+                  <button
+                    type="button"
+                    onClick={() => setRedeemedSubFilter('all')}
+                    className={`px-2.5 py-1 rounded-lg font-medium transition-colors cursor-pointer shrink-0 ${
+                      redeemedSubFilter === 'all'
+                        ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                        : 'bg-white/5 text-white/60 hover:text-white'
+                    }`}
+                  >
+                    All Redeemed History ({combinedRedeemedList.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setRedeemedSubFilter('active')}
+                    className={`px-2.5 py-1 rounded-lg font-medium transition-colors cursor-pointer shrink-0 ${
+                      redeemedSubFilter === 'active'
+                        ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                        : 'bg-white/5 text-white/60 hover:text-white'
+                    }`}
+                  >
+                    Active Unlocked ({combinedRedeemedList.filter((i) => i.status === 'active').length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setRedeemedSubFilter('disabled')}
+                    className={`px-2.5 py-1 rounded-lg font-medium transition-colors cursor-pointer shrink-0 ${
+                      redeemedSubFilter === 'disabled'
+                        ? 'bg-red-500/20 text-red-300 border border-red-500/30'
+                        : 'bg-white/5 text-white/60 hover:text-white'
+                    }`}
+                  >
+                    Disabled / Blocked ({combinedRedeemedList.filter((i) => i.status === 'disabled').length})
+                  </button>
+                  {combinedRedeemedList.some((i) => i.status === 'cleared') && (
+                    <button
+                      type="button"
+                      onClick={() => setRedeemedSubFilter('cleared')}
+                      className={`px-2.5 py-1 rounded-lg font-medium transition-colors cursor-pointer shrink-0 ${
+                        redeemedSubFilter === 'cleared'
+                          ? 'bg-purple-500/20 text-purple-300 border border-purple-500/30'
+                          : 'bg-white/5 text-white/60 hover:text-white'
+                      }`}
+                    >
+                      Cleared History ({combinedRedeemedList.filter((i) => i.status === 'cleared').length})
+                    </button>
+                  )}
                 </div>
 
                 {filteredRedeemed.length === 0 ? (
                   <div className="flex-1 flex flex-col items-center justify-center p-8 text-center bg-[#181a24]/30 rounded-xl border border-white/[0.04]">
-                    <Key className="w-8 h-8 text-white/20 mb-2" />
-                    <p className="text-xs text-white/50">
+                    <History className="w-8 h-8 text-amber-400/30 mb-2" />
+                    <p className="text-xs text-white/60 font-medium">
                       {searchFilter ? 'No redeemed keys match your search.' : 'No keys have been redeemed yet.'}
+                    </p>
+                    <p className="text-[11px] text-white/40 mt-1">
+                      Whenever any user verifies a key, it is permanently remembered here.
                     </p>
                   </div>
                 ) : (
@@ -1053,9 +1340,9 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                     {filteredRedeemed.map((item) => (
                       <div
                         key={item.key}
-                        className="bg-[#181a24] border border-white/[0.06] rounded-xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs"
+                        className="bg-[#181a24] border border-white/[0.06] rounded-xl p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs hover:border-white/10 transition-colors"
                       >
-                        <div className="space-y-1 min-w-0">
+                        <div className="space-y-1.5 min-w-0">
                           <div className="flex items-center gap-2 flex-wrap">
                             <span className="font-mono font-bold text-white text-sm">
                               {item.key}
@@ -1067,31 +1354,45 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                               title="Copy Key"
                             >
                               {copiedKey === item.key ? (
-                                <Check className="w-3 h-3 text-emerald-400" />
+                                <Check className="w-3.5 h-3.5 text-emerald-400" />
                               ) : (
-                                <Copy className="w-3 h-3" />
+                                <Copy className="w-3.5 h-3.5" />
                               )}
                             </button>
-                            {item.isDisabled ? (
-                              <span className="px-2 py-0.5 rounded-full bg-red-500/20 text-red-300 border border-red-500/30 text-[10px] font-bold flex items-center gap-1">
+
+                            {item.status === 'disabled' ? (
+                              <span className="px-2.5 py-0.5 rounded-full bg-red-500/20 text-red-300 border border-red-500/30 text-[10px] font-bold flex items-center gap-1">
                                 <Ban className="w-2.5 h-2.5" /> Disabled / Revoked
                               </span>
+                            ) : item.status === 'active' ? (
+                              <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[10px] font-bold flex items-center gap-1">
+                                <CheckCircle2 className="w-2.5 h-2.5" /> Active & Unlocked
+                              </span>
                             ) : (
-                              <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[10px] font-bold flex items-center gap-1">
-                                <CheckCircle2 className="w-2.5 h-2.5" /> Redeemed & Active
+                              <span className="px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[10px] font-bold flex items-center gap-1">
+                                <History className="w-2.5 h-2.5" /> Redeemed Before (Cleared)
+                              </span>
+                            )}
+
+                            {item.redemptionCount && item.redemptionCount > 1 && (
+                              <span className="px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-300 border border-blue-500/30 text-[10px] font-semibold">
+                                {item.redemptionCount}x redeemed
                               </span>
                             )}
                           </div>
-                          <div className="text-[11px] text-white/40 flex items-center gap-3">
-                            <span>Device: <code className="text-white/60">{item.deviceId}</code></span>
+
+                          <div className="text-[11px] text-white/45 flex items-center gap-3 flex-wrap">
+                            <span>Device: <code className="text-white/70 font-mono">{item.deviceId}</code></span>
                             {item.redeemedAt && (
-                              <span>Redeemed: {new Date(item.redeemedAt).toLocaleDateString()}</span>
+                              <span>
+                                • Redeemed: <strong className="text-white/70 font-medium">{new Date(item.redeemedAt).toLocaleString()}</strong>
+                              </span>
                             )}
                           </div>
                         </div>
 
                         <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
-                          {item.isDisabled ? (
+                          {item.status === 'disabled' ? (
                             <button
                               type="button"
                               onClick={() => handleEnableKey(item.key)}
@@ -1107,7 +1408,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                               disabled={actionLoading}
                               className="px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-500 text-white text-xs font-semibold transition-colors shadow-sm flex items-center gap-1.5 cursor-pointer"
                             >
-                              <Ban className="w-3 h-3" />
+                              <Ban className="w-3.5 h-3.5" />
                               <span>Disable Key</span>
                             </button>
                           )}
@@ -1116,10 +1417,20 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                             type="button"
                             onClick={() => handleClearRedemption(item.key)}
                             disabled={actionLoading}
-                            title="Clear this redemption record so the key can be re-used"
+                            title="Reset active device lock for re-testing (key stays permanently in redeemed history)"
                             className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-white/40 hover:text-white transition-colors cursor-pointer"
                           >
                             <RotateCcw className="w-3.5 h-3.5" />
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => handleQuickUnlockThisDevice(item.key)}
+                            title="Test activating this key on your current device"
+                            className="px-2.5 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-white/60 hover:text-white text-[11px] font-medium transition-colors cursor-pointer flex items-center gap-1"
+                          >
+                            <span>Test</span>
+                            <ArrowRight className="w-3 h-3" />
                           </button>
                         </div>
                       </div>

@@ -50,16 +50,36 @@ export default function App() {
 
   const [toastMessage, setToastMessage] = useState<{ title: string; subtitle: string } | null>(null);
 
-  // Background server check for device unlock registration and revocation
+  // Background server check and continuous live revocation monitoring
   useEffect(() => {
-    // Sync any locally stored active key with server so it's tracked in admin panel
+    // Initial verification
     syncActiveKeyWithServer();
-
-    // Verify status with server
     verifyDeviceStatusWithServer().then((unlocked) => {
       setIsSendUnlocked(unlocked);
     });
-  }, []);
+
+    // Continuous live polling: checks every 2.5 seconds if admin disabled the active key or device
+    const interval = setInterval(async () => {
+      const active = getActiveKey();
+      if (!active) {
+        if (isSendUnlocked) setIsSendUnlocked(false);
+        return;
+      }
+
+      const stillValid = await verifyDeviceStatusWithServer();
+      if (!stillValid && isSendUnlocked) {
+        setIsSendUnlocked(false);
+        setIsSendModalOpen(false);
+        setIsKeyModalOpen(true);
+        setToastMessage({
+          title: 'Access Revoked',
+          subtitle: 'Your key has been disabled by the administrator.',
+        });
+      }
+    }, 2500);
+
+    return () => clearInterval(interval);
+  }, [isSendUnlocked]);
 
   // Shortcut to open Admin Panel from anywhere (Ctrl+Shift+A or Alt+A)
   useEffect(() => {

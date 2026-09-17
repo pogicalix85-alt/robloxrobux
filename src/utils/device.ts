@@ -108,6 +108,58 @@ export function isDeviceUnlocked(): boolean {
   }
 }
 
+const STORAGE_REDEEMED_HISTORY = 'roblox_redeemed_keys_history';
+
+export interface LocalRedeemedKeyRecord {
+  key: string;
+  deviceId: string;
+  redeemedAt: string;
+}
+
+/**
+ * Record a key in permanent local storage so it is remembered as redeemed before
+ */
+export function recordRedeemedKeyLocally(key: string, deviceId?: string): void {
+  try {
+    const raw = localStorage.getItem(STORAGE_REDEEMED_HISTORY);
+    const list: LocalRedeemedKeyRecord[] = raw ? JSON.parse(raw) : [];
+    const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+    const cleanKey = norm(key);
+    if (!list.some((item) => norm(item.key) === cleanKey)) {
+      list.push({
+        key,
+        deviceId: deviceId || getDeviceId(),
+        redeemedAt: new Date().toISOString(),
+      });
+      localStorage.setItem(STORAGE_REDEEMED_HISTORY, JSON.stringify(list));
+    }
+  } catch {
+    //
+  }
+}
+
+/**
+ * Get all keys recorded locally as redeemed before
+ */
+export function getLocallyRedeemedKeys(): LocalRedeemedKeyRecord[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_REDEEMED_HISTORY);
+    const list: LocalRedeemedKeyRecord[] = raw ? JSON.parse(raw) : [];
+    const active = getActiveKey();
+    const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (active && !list.some((i) => norm(i.key) === norm(active))) {
+      list.push({
+        key: active,
+        deviceId: getDeviceId(),
+        redeemedAt: new Date().toISOString(),
+      });
+    }
+    return list;
+  } catch {
+    return [];
+  }
+}
+
 /**
  * Marks this device as permanently unlocked after a key is verified
  */
@@ -115,6 +167,7 @@ export function setDeviceUnlocked(key: string): void {
   try {
     localStorage.setItem(STORAGE_UNLOCKED_KEY, 'true');
     localStorage.setItem(STORAGE_ACTIVE_KEY, key);
+    recordRedeemedKeyLocally(key);
   } catch {
     // LocalStorage blocked
   }

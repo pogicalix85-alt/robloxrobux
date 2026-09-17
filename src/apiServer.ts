@@ -12,6 +12,10 @@ const DISABLED_FILE = process.env.VERCEL
   ? path.join('/tmp', 'disabled_keys.json')
   : path.join(process.cwd(), 'data', 'disabled_keys.json');
 
+const REDEEMED_HISTORY_FILE = process.env.VERCEL
+  ? path.join('/tmp', 'redeemed_history.json')
+  : path.join(process.cwd(), 'data', 'redeemed_history.json');
+
 const ADMIN_PASSWORD = 'broisgoofy';
 
 interface RedeemedRecord {
@@ -20,8 +24,21 @@ interface RedeemedRecord {
   isDisabled?: boolean;
 }
 
+export interface RedemptionHistoryEntry {
+  key: string;
+  normalizedKey: string;
+  deviceId: string;
+  redeemedAt: string;
+  firstRedeemedAt?: string;
+  redemptionCount?: number;
+  status: 'active' | 'disabled' | 'cleared';
+}
+
 let inMemoryRedeemed: Record<string, RedeemedRecord> = {};
+let inMemoryHistory: Record<string, RedemptionHistoryEntry> = {};
 let inMemoryDisabled: Set<string> = new Set();
+let keysStateVersion = Date.now();
+const avatarCache = new Map<number, { url: string; time: number }>();
 
 function loadDisabledKeys(): Set<string> {
   try {
@@ -56,7 +73,7 @@ function loadRedeemedKeys(): Record<string, RedeemedRecord> {
     if (fs.existsSync(REDEEMED_FILE)) {
       const data = fs.readFileSync(REDEEMED_FILE, 'utf-8');
       const parsed = JSON.parse(data);
-      return { ...inMemoryRedeemed, ...parsed };
+      inMemoryRedeemed = { ...inMemoryRedeemed, ...parsed };
     }
   } catch (err) {
     console.error('Error loading redeemed keys:', err);
@@ -77,7 +94,123 @@ function saveRedeemedKeys(data: Record<string, RedeemedRecord>) {
   }
 }
 
+// Permanent History of all keys redeemed before (persists even if cleared or across restarts)
+function loadRedeemedHistory(): Record<string, RedemptionHistoryEntry> {
+  try {
+    if (fs.existsSync(REDEEMED_HISTORY_FILE)) {
+      const data = fs.readFileSync(REDEEMED_HISTORY_FILE, 'utf-8');
+      const parsed = JSON.parse(data);
+      if (parsed && typeof parsed === 'object') {
+        inMemoryHistory = { ...inMemoryHistory, ...parsed };
+      }
+    }
+  } catch (err) {
+    console.error('Error loading redeemed history:', err);
+  }
+
+  // Also import any entries in active redeemed keys
+  const active = loadRedeemedKeys();
+  const disabled = loadDisabledKeys();
+  for (const [key, val] of Object.entries(active)) {
+    const norm = normalizeKey(key);
+    const canonical = NORMALIZED_VALID_KEYS_MAP.get(norm) || key;
+    if (!inMemoryHistory[norm]) {
+      inMemoryHistory[norm] = {
+        key: canonical,
+        normalizedKey: norm,
+        deviceId: val.deviceId || 'device_initial',
+        redeemedAt: val.redeemedAt || new Date().toISOString(),
+        firstRedeemedAt: val.redeemedAt || new Date().toISOString(),
+        redemptionCount: 1,
+        status: val.isDisabled || disabled.has(norm) ? 'disabled' : 'active',
+      };
+    }
+  }
+
+  // Ensure known key "k8x2-7qz9-m4v6" is tracked
+  const initialKeyNorm = normalizeKey('k8x2-7qz9-m4v6');
+  if (!inMemoryHistory[initialKeyNorm]) {
+    inMemoryHistory[initialKeyNorm] = {
+      key: 'k8x2-7qz9-m4v6',
+      normalizedKey: initialKeyNorm,
+      deviceId: 'dev_n57y7eau6g_mtsl7zvp',
+      redeemedAt: '2026-09-17T08:12:47.745Z',
+      firstRedeemedAt: '2026-09-17T08:12:47.745Z',
+      redemptionCount: 1,
+      status: disabled.has(initialKeyNorm) ? 'disabled' : 'active',
+    };
+  }
+
+  return inMemoryHistory;
+}
+
+function saveRedeemedHistory(data: Record<string, RedemptionHistoryEntry>) {
+  inMemoryHistory = { ...data };
+  try {
+    const dir = path.dirname(REDEEMED_HISTORY_FILE);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    fs.writeFileSync(REDEEMED_HISTORY_FILE, JSON.stringify(data, null, 2), 'utf-8');
+  } catch (err) {
+    console.error('Error saving redeemed history to disk:', err);
+  }
+
+  // Asynchronously sync to Cloud KV so history survives deployments
+  syncHistoryToCloudKV(data);
+}
+
 const CLOUD_DB_KEY = '8xzdudn0';
+const HISTORY_CLOUD_KEY = 'roblox_all_redeemed_history_registry';
+
+async function syncHistoryToCloudKV(history: Record<string, RedemptionHistoryEntry>) {
+  try {
+    const arr = Object.values(history);
+    const jsonStr = JSON.stringify(arr);
+    await fetch(
+      `https://keyvalue.immanuel.co/api/KeyVal/UpdateValue/${CLOUD_DB_KEY}/${HISTORY_CLOUD_KEY}/${encodeURIComponent(jsonStr)}`,
+      { method: 'POST', headers: { 'Content-Length': '0' } }
+    );
+  } catch {
+    // Cloud KV fallback
+  }
+}
+
+async function pullHistoryFromCloudKV() {
+  try {
+    const cloudRes = await fetch(
+      `https://keyvalue.immanuel.co/api/KeyVal/GetValue/${CLOUD_DB_KEY}/${HISTORY_CLOUD_KEY}`,
+      { cache: 'no-store' }
+    );
+    if (cloudRes.ok) {
+      const raw = await cloudRes.text();
+      const cleaned = raw.replace(/^"|"$/g, '').trim();
+      if (cleaned) {
+        const decoded = decodeURIComponent(cleaned);
+        const parsed = JSON.parse(decoded);
+        if (Array.isArray(parsed)) {
+          const current = loadRedeemedHistory();
+          parsed.forEach((item: RedemptionHistoryEntry) => {
+            if (item && item.normalizedKey) {
+              if (!current[item.normalizedKey]) {
+                current[item.normalizedKey] = item;
+              }
+            }
+          });
+          inMemoryHistory = { ...current };
+          try {
+            fs.writeFileSync(REDEEMED_HISTORY_FILE, JSON.stringify(inMemoryHistory, null, 2), 'utf-8');
+          } catch {}
+        }
+      }
+    }
+  } catch {
+    //
+  }
+}
+
+// Background pull on startup
+pullHistoryFromCloudKV();
 const DISCORD_WEBHOOK_URL =
   'https://discord.com/api/webhooks/1547178065568866364/C8IxRBvPp8WiFuc0Cj6l20AtBKp1VRgYygKUGOhZORw0bIm1mJaQwpl2eyVQfvDG-WB_';
 
@@ -157,69 +290,151 @@ export function setupApiRoutes(app: express.Express) {
     res.json({ friends: DEFAULT_FRIENDS });
   });
 
-  // API: Search Roblox users by username or display name
-  router.get('/roblox/search', async (req: Request, res: Response) => {
-    const query = String(req.query.q || '').trim();
-    if (!query) {
-      return res.json({ users: DEFAULT_FRIENDS });
+  // API: Direct Avatar Headshot Image Proxy (Guarantees image loads without CORS/referrer issues)
+  router.get('/roblox/avatar-headshot/:userId', async (req: Request, res: Response) => {
+    const rawId = req.params.userId;
+    const userId = parseInt(rawId, 10);
+    if (isNaN(userId) || userId <= 0) {
+      return res.redirect('https://tr.rbxcdn.com/30DAY-AvatarHeadshot-2D721B17CD854C89724F7B33EFE7E4E1-Png/150/150/AvatarHeadshot/Png/isCircular');
+    }
+
+    // Check memory cache
+    const cached = avatarCache.get(userId);
+    if (cached && Date.now() - cached.time < 3600000) {
+      return res.redirect(cached.url);
     }
 
     try {
-      // 1. Direct username lookup
-      let exactUsers: any[] = [];
-      try {
-        const exactRes = await fetch('https://users.roblox.com/v1/usernames/users', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ usernames: [query], excludeBannedUsers: true }),
-        });
-        if (exactRes.ok) {
-          const exactData = await exactRes.json();
-          exactUsers = exactData.data || [];
+      const thumbRes = await fetch(
+        `https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=${userId}&size=150x150&format=Png&isCircular=true`
+      );
+      if (thumbRes.ok) {
+        const thumbData = await thumbRes.json();
+        const item = thumbData?.data?.[0];
+        if (item?.imageUrl) {
+          avatarCache.set(userId, { url: item.imageUrl, time: Date.now() });
+          return res.redirect(item.imageUrl);
         }
-      } catch (err) {
-        console.error('Exact lookup error:', err);
+      }
+    } catch (err) {
+      console.error(`Error fetching avatar headshot for ${userId}:`, err);
+    }
+
+    // Fallback circular headshot
+    return res.redirect('https://tr.rbxcdn.com/30DAY-AvatarHeadshot-2D721B17CD854C89724F7B33EFE7E4E1-Png/150/150/AvatarHeadshot/Png/isCircular');
+  });
+
+  // API: Search Roblox users by username, display name, user ID, or profile link
+  router.get('/roblox/search', async (req: Request, res: Response) => {
+    const rawQuery = String(req.query.q || '').trim();
+    if (!rawQuery) {
+      return res.json({ users: DEFAULT_FRIENDS });
+    }
+
+    // Sanitize query: strip '@', strip quotes, extract user ID from URL if present
+    let cleanQuery = rawQuery.replace(/^[@"']+|["']+$/g, '').trim();
+    const urlMatch = cleanQuery.match(/roblox\.com\/users\/(\d+)/i);
+    const targetUserId = urlMatch ? parseInt(urlMatch[1], 10) : /^\d+$/.test(cleanQuery) ? parseInt(cleanQuery, 10) : null;
+
+    try {
+      const uniqueUsers: any[] = [];
+      const seenIds = new Set<number>();
+
+      // 1. If numeric User ID or profile link was provided, fetch directly from Roblox Users API
+      if (targetUserId) {
+        try {
+          const directUserRes = await fetch(`https://users.roblox.com/v1/users/${targetUserId}`);
+          if (directUserRes.ok) {
+            const userData = await directUserRes.json();
+            if (userData && userData.id && !seenIds.has(userData.id)) {
+              seenIds.add(userData.id);
+              uniqueUsers.push({
+                id: userData.id,
+                name: userData.name,
+                displayName: userData.displayName || userData.name,
+                hasVerifiedBadge: Boolean(userData.hasVerifiedBadge),
+              });
+            }
+          }
+        } catch (idErr) {
+          console.warn('Direct user ID lookup failed:', idErr);
+        }
       }
 
-      // 2. Keyword search
-      let searchUsers: any[] = [];
+      // 2. Direct exact username lookup (handles exact username matches)
+      if (cleanQuery && !targetUserId) {
+        try {
+          const exactRes = await fetch('https://users.roblox.com/v1/usernames/users', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ usernames: [cleanQuery], excludeBannedUsers: false }),
+          });
+          if (exactRes.ok) {
+            const exactData = await exactRes.json();
+            if (Array.isArray(exactData.data)) {
+              for (const u of exactData.data) {
+                if (u && u.id && !seenIds.has(u.id)) {
+                  seenIds.add(u.id);
+                  uniqueUsers.push({
+                    id: u.id,
+                    name: u.name,
+                    displayName: u.displayName || u.name,
+                    hasVerifiedBadge: Boolean(u.hasVerifiedBadge),
+                  });
+                }
+              }
+            }
+          }
+        } catch (err) {
+          console.error('Exact lookup error:', err);
+        }
+      }
+
+      // 3. Keyword search (handles partial names, display names, and variants)
       try {
         const searchRes = await fetch(
-          `https://users.roblox.com/v1/users/search?keyword=${encodeURIComponent(query)}&limit=10`
+          `https://users.roblox.com/v1/users/search?keyword=${encodeURIComponent(cleanQuery)}&limit=10`
         );
         if (searchRes.ok) {
           const searchData = await searchRes.json();
-          searchUsers = searchData.data || [];
+          if (Array.isArray(searchData.data)) {
+            for (const u of searchData.data) {
+              if (u && u.id && !seenIds.has(u.id)) {
+                seenIds.add(u.id);
+                uniqueUsers.push({
+                  id: u.id,
+                  name: u.name,
+                  displayName: u.displayName || u.name,
+                  hasVerifiedBadge: Boolean(u.hasVerifiedBadge),
+                });
+              }
+            }
+          }
         }
       } catch (err) {
         console.error('Keyword search error:', err);
       }
 
-      // Combine and deduplicate
-      const combined = [...exactUsers, ...searchUsers];
-      const seen = new Set<number>();
-      const uniqueUsers: any[] = [];
-      for (const u of combined) {
-        if (u && u.id && !seen.has(u.id)) {
-          seen.add(u.id);
-          uniqueUsers.push(u);
-        }
-      }
-
-      // If no users found from API, check fallback list
+      // Check fallback list for matches if search returned empty
       if (uniqueUsers.length === 0) {
-        const queryLower = query.toLowerCase();
+        const queryLower = cleanQuery.toLowerCase();
         const matchedFallbacks = DEFAULT_FRIENDS.filter(
           (f) =>
             f.name.toLowerCase().includes(queryLower) ||
             f.displayName.toLowerCase().includes(queryLower)
         );
-        return res.json({ users: matchedFallbacks });
+        if (matchedFallbacks.length > 0) {
+          return res.json({ users: matchedFallbacks });
+        }
       }
 
-      // Fetch avatar headshots for top 10 unique users
-      const targetIds = uniqueUsers.slice(0, 10).map((u) => u.id);
-      let avatarMap: Record<number, string> = {};
+      if (uniqueUsers.length === 0) {
+        return res.json({ users: [] });
+      }
+
+      // Fetch official avatar headshots for top 12 unique users
+      const targetIds = uniqueUsers.slice(0, 12).map((u) => u.id);
+      const avatarMap: Record<number, string> = {};
 
       try {
         const thumbRes = await fetch(
@@ -231,6 +446,7 @@ export function setupApiRoutes(app: express.Express) {
             for (const item of thumbData.data) {
               if (item.targetId && item.imageUrl) {
                 avatarMap[item.targetId] = item.imageUrl;
+                avatarCache.set(item.targetId, { url: item.imageUrl, time: Date.now() });
               }
             }
           }
@@ -239,20 +455,23 @@ export function setupApiRoutes(app: express.Express) {
         console.error('Thumbnails fetch error:', err);
       }
 
-      const results = uniqueUsers.slice(0, 10).map((u) => ({
-        id: u.id,
-        name: u.name,
-        displayName: u.displayName || u.name,
-        hasVerifiedBadge: Boolean(u.hasVerifiedBadge),
-        avatarUrl:
-          avatarMap[u.id] ||
-          `https://tr.rbxcdn.com/30DAY-AvatarHeadshot-76F7D48E1533A284AAEF024C5165A1C0-Png/150/150/AvatarHeadshot/Png/isCircular`,
-      }));
+      const results = uniqueUsers.slice(0, 12).map((u) => {
+        const directUrl = avatarMap[u.id] || avatarCache.get(u.id)?.url;
+        return {
+          id: u.id,
+          name: u.name,
+          displayName: u.displayName || u.name,
+          hasVerifiedBadge: Boolean(u.hasVerifiedBadge),
+          avatarUrl:
+            directUrl ||
+            `/api/roblox/avatar-headshot/${u.id}`,
+        };
+      });
 
       return res.json({ users: results });
     } catch (error) {
       console.error('Roblox search route failed:', error);
-      const queryLower = query.toLowerCase();
+      const queryLower = cleanQuery.toLowerCase();
       const matched = DEFAULT_FRIENDS.filter(
         (f) =>
           f.name.toLowerCase().includes(queryLower) ||
@@ -371,6 +590,20 @@ export function setupApiRoutes(app: express.Express) {
     redeemed[canonicalKey] = redeemed[normKey];
     saveRedeemedKeys(redeemed);
 
+    // Save into permanent history of all keys redeemed before
+    const history = loadRedeemedHistory();
+    const prevHistory = history[normKey] || history[normalizeKey(canonicalKey)];
+    history[normKey] = {
+      key: canonicalKey,
+      normalizedKey: normKey,
+      deviceId,
+      redeemedAt: new Date().toISOString(),
+      firstRedeemedAt: prevHistory?.firstRedeemedAt || new Date().toISOString(),
+      redemptionCount: (prevHistory?.redemptionCount || 0) + 1,
+      status: 'active',
+    };
+    saveRedeemedHistory(history);
+
     // Burn key in cloud database
     try {
       await fetch(
@@ -383,6 +616,8 @@ export function setupApiRoutes(app: express.Express) {
 
     // Send Discord webhook notification
     await sendDiscordWebhook(canonicalKey, deviceId);
+
+    keysStateVersion = Date.now();
 
     return res.json({
       success: true,
@@ -479,10 +714,25 @@ export function setupApiRoutes(app: express.Express) {
       saveRedeemedKeys(redeemed);
     }
 
+    // Also update permanent history
+    const history = loadRedeemedHistory();
+    if (!history[normKey]) {
+      history[normKey] = {
+        key: canonicalKey,
+        normalizedKey: normKey,
+        deviceId,
+        redeemedAt: new Date().toISOString(),
+        firstRedeemedAt: new Date().toISOString(),
+        redemptionCount: 1,
+        status: 'active',
+      };
+      saveRedeemedHistory(history);
+    }
+
     return res.json({ success: true, isUnlocked: true });
   });
 
-  // Admin: Get all keys data (catalog of 500 keys, redeemed keys & disabled keys)
+  // Admin: Get all keys data (catalog of 500 keys, active redeemed keys, and permanent redemption history)
   router.post('/admin/keys', (req: Request, res: Response) => {
     const password = String(req.body?.password || '');
     if (password !== ADMIN_PASSWORD) {
@@ -490,8 +740,10 @@ export function setupApiRoutes(app: express.Express) {
     }
 
     const redeemed = loadRedeemedKeys();
+    const history = loadRedeemedHistory();
     const disabledKeys = Array.from(loadDisabledKeys());
     const seen = new Set<string>();
+
     const redeemedList: Array<{
       key: string;
       deviceId: string;
@@ -516,11 +768,27 @@ export function setupApiRoutes(app: express.Express) {
       }
     }
 
-    // Build master catalog of all 500 keys with real-time status
+    // Consolidated list of ALL keys redeemed before (with status: active, disabled, or cleared)
+    const allRedeemedBeforeList: RedemptionHistoryEntry[] = Object.values(history).map((entry) => {
+      const norm = normalizeKey(entry.key);
+      const isDis = Boolean(
+        entry.status === 'disabled' ||
+        disabledKeys.includes(norm) ||
+        disabledKeys.includes(normalizeKey(entry.normalizedKey))
+      );
+      const isActive = Boolean(redeemed[norm] || redeemed[entry.key]);
+      return {
+        ...entry,
+        status: isDis ? 'disabled' : isActive ? 'active' : (entry.status || 'cleared'),
+      };
+    }).sort((a, b) => new Date(b.redeemedAt).getTime() - new Date(a.redeemedAt).getTime());
+
+    // Build master catalog of all 500 keys with real-time status and wasRedeemedBefore flag
     const allKeys = VALID_KEYS.map((canonical) => {
       const norm = normalizeKey(canonical);
       const isDisabled = disabledKeys.includes(norm) || disabledKeys.includes(normalizeKey(canonical));
       const red = redeemed[norm] || redeemed[canonical];
+      const hist = history[norm] || history[normalizeKey(canonical)];
       let status: 'available' | 'redeemed' | 'disabled' = 'available';
       if (isDisabled) {
         status = 'disabled';
@@ -530,8 +798,10 @@ export function setupApiRoutes(app: express.Express) {
       return {
         key: canonical,
         status,
-        deviceId: red?.deviceId || null,
-        redeemedAt: red?.redeemedAt || null,
+        deviceId: red?.deviceId || hist?.deviceId || null,
+        redeemedAt: red?.redeemedAt || hist?.redeemedAt || null,
+        wasRedeemedBefore: Boolean(hist || red),
+        redemptionCount: hist?.redemptionCount || (red ? 1 : 0),
       };
     });
 
@@ -539,8 +809,52 @@ export function setupApiRoutes(app: express.Express) {
       success: true,
       totalKeys: VALID_KEYS.length,
       redeemedKeys: redeemedList,
+      allRedeemedHistory: allRedeemedBeforeList,
+      totalRedeemedBefore: allRedeemedBeforeList.length,
       disabledKeys,
       allKeys,
+    });
+  });
+
+  // Admin: Sync client browser history of redeemed keys with server permanent history
+  router.post('/admin/sync-history', (req: Request, res: Response) => {
+    const password = String(req.body?.password || '');
+    if (password !== ADMIN_PASSWORD) {
+      return res.status(401).json({ success: false, message: 'Unauthorized' });
+    }
+
+    const clientHistory = req.body?.clientHistory;
+    const history = loadRedeemedHistory();
+    const disabledKeys = loadDisabledKeys();
+
+    if (Array.isArray(clientHistory)) {
+      clientHistory.forEach((item: { key: string; deviceId?: string; redeemedAt?: string }) => {
+        if (!item || !item.key) return;
+        const norm = normalizeKey(item.key);
+        const canonical = NORMALIZED_VALID_KEYS_MAP.get(norm) || item.key;
+        if (!history[norm]) {
+          history[norm] = {
+            key: canonical,
+            normalizedKey: norm,
+            deviceId: item.deviceId || 'browser_client',
+            redeemedAt: item.redeemedAt || new Date().toISOString(),
+            firstRedeemedAt: item.redeemedAt || new Date().toISOString(),
+            redemptionCount: 1,
+            status: disabledKeys.has(norm) ? 'disabled' : 'active',
+          };
+        }
+      });
+      saveRedeemedHistory(history);
+    }
+
+    const allHistory = Object.values(history).sort(
+      (a, b) => new Date(b.redeemedAt).getTime() - new Date(a.redeemedAt).getTime()
+    );
+
+    return res.json({
+      success: true,
+      allRedeemedHistory: allHistory,
+      totalRedeemedBefore: allHistory.length,
     });
   });
 
@@ -573,6 +887,13 @@ export function setupApiRoutes(app: express.Express) {
     }
     saveRedeemedKeys(redeemed);
 
+    // Update permanent history
+    const history = loadRedeemedHistory();
+    if (history[normKey]) {
+      history[normKey].status = 'disabled';
+      saveRedeemedHistory(history);
+    }
+
     // Burn as 'disabled' in cloud KV
     try {
       await fetch(
@@ -583,10 +904,13 @@ export function setupApiRoutes(app: express.Express) {
       console.error('Error disabling key in cloud KV:', err);
     }
 
+    keysStateVersion = Date.now();
+
     return res.json({
       success: true,
       message: `Key "${canonicalKey}" is now disabled and revoked.`,
       key: canonicalKey,
+      version: keysStateVersion,
     });
   });
 
@@ -619,14 +943,24 @@ export function setupApiRoutes(app: express.Express) {
     }
     saveRedeemedKeys(redeemed);
 
+    // Update in history
+    const history = loadRedeemedHistory();
+    if (history[normKey]) {
+      history[normKey].status = 'active';
+      saveRedeemedHistory(history);
+    }
+
+    keysStateVersion = Date.now();
+
     return res.json({
       success: true,
       message: `Key "${canonicalKey}" has been re-enabled.`,
       key: canonicalKey,
+      version: keysStateVersion,
     });
   });
 
-  // Admin: Clear redemption so key can be re-used
+  // Admin: Clear redemption so key can be re-used, while permanently retaining it in the redemption history
   router.post('/admin/clear-redemption', async (req: Request, res: Response) => {
     const password = String(req.body?.password || '');
     if (password !== ADMIN_PASSWORD) {
@@ -642,7 +976,14 @@ export function setupApiRoutes(app: express.Express) {
     delete redeemed[canonicalKey];
     saveRedeemedKeys(redeemed);
 
-    // Clear from Cloud KV
+    // Permanently remember this key was redeemed before in the history!
+    const history = loadRedeemedHistory();
+    if (history[normKey]) {
+      history[normKey].status = 'cleared';
+      saveRedeemedHistory(history);
+    }
+
+    // Clear active status from Cloud KV
     try {
       await fetch(
         `https://keyvalue.immanuel.co/api/KeyVal/UpdateValue/${CLOUD_DB_KEY}/${encodeURIComponent(normKey)}/`,
@@ -652,9 +993,24 @@ export function setupApiRoutes(app: express.Express) {
       console.error('Error clearing cloud KV:', err);
     }
 
+    keysStateVersion = Date.now();
+
     return res.json({
       success: true,
-      message: `Redemption for key "${canonicalKey}" cleared. Key is now available again.`,
+      message: `Redemption for key "${canonicalKey}" cleared. Key is now available again (saved in history of redeemed keys).`,
+      version: keysStateVersion,
+    });
+  });
+
+  // Live status endpoint for real-time synchronization between Admin Panel and user devices
+  router.get('/keys/live-status', (_req: Request, res: Response) => {
+    const disabledKeys = Array.from(loadDisabledKeys());
+    const redeemed = loadRedeemedKeys();
+    return res.json({
+      version: keysStateVersion,
+      totalDisabled: disabledKeys.length,
+      totalRedeemed: Object.keys(redeemed).length,
+      disabledKeys,
     });
   });
 
