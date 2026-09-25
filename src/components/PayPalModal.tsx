@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { X, Lock, Check, ShieldCheck, CreditCard, Zap } from 'lucide-react';
 import { PayPalIcon, RobuxIcon, RobloxLogo } from './Icons';
-import confetti from 'canvas-confetti';
 
 export interface CheckoutItem {
   title: string;
@@ -50,24 +49,12 @@ export const PayPalModal: React.FC<PayPalModalProps> = ({
     // Simulate authentic network latency
     setTimeout(() => {
       setStep('success');
-      
-      // Fire confetti celebration
-      try {
-        confetti({
-          particleCount: 65,
-          spread: 60,
-          origin: { y: 0.7 },
-          colors: ['#2f64e8', '#00c3ff', '#ffd700', '#ffffff'],
-        });
-      } catch (e) {
-        // Safe fallback
-      }
 
       // Add robux after short delay
       setTimeout(() => {
         onSuccess(item.robux);
-      }, 1400);
-    }, 1600);
+      }, 1200);
+    }, 1200);
   };
 
   return (

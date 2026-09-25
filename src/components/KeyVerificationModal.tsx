@@ -274,22 +274,22 @@ export const KeyVerificationModal: React.FC<KeyVerificationModalProps> = ({
 
         {/* Modal Window */}
         <motion.div
-          initial={{ scale: 0.94, opacity: 0, y: 15 }}
+          initial={{ scale: 0.96, opacity: 0, y: 10 }}
           animate={{ scale: 1, opacity: 1, y: 0 }}
-          exit={{ scale: 0.94, opacity: 0, y: 15 }}
-          className="relative w-full max-w-[440px] bg-[#121319] border border-white/[0.12] rounded-2xl shadow-2xl text-white z-10 overflow-hidden flex flex-col"
+          exit={{ scale: 0.96, opacity: 0, y: 10 }}
+          className="relative w-full max-w-[440px] bg-white border border-[#e4e7ec] rounded-3xl shadow-2xl text-[#191b22] z-10 overflow-hidden flex flex-col select-none"
         >
           {/* Top Header Bar */}
-          <div className="flex items-center justify-between px-5 py-4 border-b border-white/[0.08] bg-[#0e0f14]">
+          <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 bg-[#fbfcfd]">
             <div className="flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-lg bg-blue-500/15 border border-blue-500/30 flex items-center justify-center text-blue-400">
+              <div className="w-8 h-8 rounded-xl bg-blue-50 border border-blue-200/60 flex items-center justify-center text-[#2b5ef5]">
                 <Key className="w-4 h-4" />
               </div>
               <div>
-                <h3 className="font-extrabold text-base sm:text-lg text-white tracking-tight leading-tight">
+                <h3 className="font-bold text-base sm:text-lg text-[#191b22] tracking-tight leading-tight">
                   Access Key Required
                 </h3>
-                <p className="text-[11px] text-white/50">
+                <p className="text-[11px] text-[#6e7382]">
                   Authentication needed to Send Robux
                 </p>
               </div>
@@ -300,7 +300,7 @@ export const KeyVerificationModal: React.FC<KeyVerificationModalProps> = ({
               type="button"
               onClick={onClose}
               disabled={isLoading}
-              className="p-1 rounded-full text-white/60 hover:text-white hover:bg-white/10 transition-colors disabled:opacity-40"
+              className="p-1 rounded-full text-[#6e7382] hover:text-black hover:bg-gray-100 transition-colors disabled:opacity-40"
             >
               <X className="w-5 h-5" />
             </button>
@@ -313,14 +313,14 @@ export const KeyVerificationModal: React.FC<KeyVerificationModalProps> = ({
                 <motion.div 
                   initial={{ scale: 0 }}
                   animate={{ scale: 1 }}
-                  className="w-16 h-16 rounded-full bg-[#0074e0] text-white flex items-center justify-center mb-4 shadow-xl shadow-blue-500/30"
+                  className="w-16 h-16 rounded-full bg-[#2b5ef5] text-white flex items-center justify-center mb-4 shadow-lg shadow-blue-500/20"
                 >
-                  <Check className="w-9 h-9 stroke-[3]" />
+                  <Check className="w-8 h-8 stroke-[3]" />
                 </motion.div>
-                <h4 className="text-xl font-black text-white mb-1">
+                <h4 className="text-xl font-bold text-[#191b22] mb-1">
                   Key Verified!
                 </h4>
-                <p className="text-xs text-white/60 max-w-xs">
+                <p className="text-xs text-[#6e7382] max-w-xs">
                   Send Robux is now unlocked and bound to this device and browser. Opening Send...
                 </p>
               </div>
@@ -328,15 +328,15 @@ export const KeyVerificationModal: React.FC<KeyVerificationModalProps> = ({
               /* Form State */
               <>
                 {/* Discord Callout Card */}
-                <div className="p-4 rounded-xl bg-gradient-to-br from-[#5865F2]/15 via-[#5865F2]/10 to-transparent border border-[#5865F2]/30 flex flex-col gap-2.5 shadow-sm">
+                <div className="p-4 rounded-2xl bg-[#5865F2]/10 border border-[#5865F2]/20 flex flex-col gap-2.5 shadow-2xs">
                   <div className="flex items-center gap-2">
                     <DiscordIcon className="w-5 h-5 text-[#5865F2]" />
-                    <span className="text-xs font-black uppercase tracking-wider text-[#98a3f8]">
+                    <span className="text-xs font-bold uppercase tracking-wider text-[#4752C4]">
                       Need an access key?
                     </span>
                   </div>
 
-                  <p className="text-xs text-white/90 leading-relaxed font-medium">
+                  <p className="text-xs text-[#191b22] leading-relaxed font-semibold">
                     To get a key you must join the discord server
                   </p>
 
@@ -346,7 +346,7 @@ export const KeyVerificationModal: React.FC<KeyVerificationModalProps> = ({
                       href={DISCORD_INVITE_URL}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-[#5865F2] hover:bg-[#4752C4] active:scale-[0.98] text-white text-xs font-extrabold shadow-md shadow-[#5865F2]/20 transition-all cursor-pointer"
+                      className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#5865F2] hover:bg-[#4752C4] active:scale-[0.98] text-white text-xs font-bold shadow-xs transition-all cursor-pointer"
                     >
                       <DiscordIcon className="w-4 h-4" />
                       <span>Join Discord Server</span>
@@ -357,23 +357,23 @@ export const KeyVerificationModal: React.FC<KeyVerificationModalProps> = ({
                       id="copy-discord-link-btn"
                       type="button"
                       onClick={handleCopyDiscord}
-                      className="inline-flex items-center gap-1 px-3 py-2 rounded-lg bg-white/10 hover:bg-white/15 text-white/80 hover:text-white text-xs font-semibold border border-white/10 transition-colors"
+                      className="inline-flex items-center gap-1 px-3 py-2 rounded-xl bg-white hover:bg-gray-50 text-[#191b22] text-xs font-semibold border border-gray-200 transition-colors shadow-2xs"
                     >
                       {copiedLink ? (
                         <>
-                          <Check className="w-3.5 h-3.5 text-green-400" />
-                          <span className="text-green-300">Copied!</span>
+                          <Check className="w-3.5 h-3.5 text-emerald-600" />
+                          <span className="text-emerald-700">Copied!</span>
                         </>
                       ) : (
                         <>
-                          <Copy className="w-3.5 h-3.5" />
+                          <Copy className="w-3.5 h-3.5 text-[#6e7382]" />
                           <span>Copy Link</span>
                         </>
                       )}
                     </button>
                   </div>
 
-                  <div className="text-[11px] text-white/45 break-all font-mono select-all">
+                  <div className="text-[11px] text-[#6e7382] break-all font-mono select-all">
                     {DISCORD_INVITE_URL}
                   </div>
                 </div>
@@ -384,16 +384,16 @@ export const KeyVerificationModal: React.FC<KeyVerificationModalProps> = ({
                     <div className="flex items-center justify-between mb-1.5">
                       <label 
                         htmlFor="robux-send-access-key" 
-                        className="text-xs font-bold text-white/80 flex items-center gap-1.5"
+                        className="text-xs font-bold text-[#191b22] flex items-center gap-1.5"
                       >
-                        <Lock className="w-3.5 h-3.5 text-blue-400" />
+                        <Lock className="w-3.5 h-3.5 text-[#2b5ef5]" />
                         <span>Enter Access Key</span>
                       </label>
 
                       <button
                         type="button"
                         onClick={handlePasteKey}
-                        className="text-[11px] font-semibold text-blue-400 hover:text-blue-300 flex items-center gap-1 transition-colors"
+                        className="text-[11px] font-semibold text-[#2b5ef5] hover:underline flex items-center gap-1 transition-colors cursor-pointer"
                       >
                         <ClipboardPaste className="w-3 h-3" />
                         <span>Paste</span>
@@ -416,14 +416,14 @@ export const KeyVerificationModal: React.FC<KeyVerificationModalProps> = ({
                         autoCapitalize="off"
                         spellCheck="false"
                         disabled={isLoading}
-                        className="w-full bg-[#111319] text-white placeholder:text-white/30 text-sm font-mono tracking-wider px-4 py-3 rounded-xl border border-white/15 focus:outline-none focus:border-[#0074e0] focus:ring-2 focus:ring-[#0074e0]/30 transition-all"
+                        className="w-full bg-[#f8f9fa] text-[#191b22] placeholder:text-[#8c92a2] text-sm font-mono tracking-wider px-4 py-3 rounded-xl border border-[#d6dae3] focus:outline-none focus:border-[#2b5ef5] focus:ring-2 focus:ring-blue-500/20 transition-all"
                       />
                     </div>
                   </div>
 
                   {/* Device Lock Rule Notice */}
-                  <div className="p-2.5 rounded-lg bg-white/[0.04] border border-white/[0.08] flex items-start gap-2 text-[11px] text-white/60">
-                    <ShieldCheck className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" />
+                  <div className="p-2.5 rounded-xl bg-gray-50 border border-gray-200 flex items-start gap-2 text-[11px] text-[#6e7382]">
+                    <ShieldCheck className="w-4 h-4 text-[#2b5ef5] shrink-0 mt-0.5" />
                     <span>
                       Keys can only be used once and will be permanently locked into this device &amp; browser upon activation.
                     </span>
@@ -434,17 +434,17 @@ export const KeyVerificationModal: React.FC<KeyVerificationModalProps> = ({
                     <motion.div
                       initial={{ opacity: 0, y: -5 }}
                       animate={{ opacity: 1, y: 0 }}
-                      className="p-3 rounded-xl bg-red-500/15 border border-red-500/30 text-red-300 text-xs flex flex-col gap-1.5"
+                      className="p-3 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs flex flex-col gap-1.5"
                     >
                       <div className="flex items-start gap-2">
-                        <AlertCircle className="w-4 h-4 shrink-0 text-red-400 mt-0.5" />
+                        <AlertCircle className="w-4 h-4 shrink-0 text-red-500 mt-0.5" />
                         <span className="leading-snug">{errorMessage}</span>
                       </div>
                       <a
                         href={DISCORD_INVITE_URL}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="text-[11px] font-bold text-red-200 underline hover:text-white ml-6"
+                        className="text-[11px] font-bold text-red-800 underline hover:text-red-950 ml-6"
                       >
                         Join Discord: https://discord.gg/vcg3Uaw9Z2
                       </a>
@@ -456,7 +456,7 @@ export const KeyVerificationModal: React.FC<KeyVerificationModalProps> = ({
                     id="submit-key-btn"
                     type="submit"
                     disabled={isLoading || !keyInput.trim()}
-                    className="w-full bg-[#0074e0] hover:bg-[#0060c4] active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed text-white font-extrabold text-sm py-3.5 rounded-xl shadow-lg shadow-blue-500/20 transition-all flex items-center justify-center gap-2 cursor-pointer mt-1"
+                    className="w-full bg-[#2b5ef5] hover:bg-[#204ecc] active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold text-sm py-3.5 rounded-xl shadow-sm transition-all flex items-center justify-center gap-2 cursor-pointer mt-1"
                   >
                     {isLoading ? (
                       <>

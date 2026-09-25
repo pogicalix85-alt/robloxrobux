@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { X, Calculator, Sparkles, Sliders, ArrowRight, RotateCcw } from 'lucide-react';
+import { X, Calculator, ArrowRight, RotateCcw } from 'lucide-react';
 import { RobuxIcon } from './Icons';
 
 interface CustomRobuxModalProps {
@@ -28,13 +28,8 @@ export const CustomRobuxModal: React.FC<CustomRobuxModalProps> = ({
 
   if (!isOpen) return null;
 
-  // Pricing formula: prices of robux change depending on the robux amount (volume discounts)
+  // Pricing formula in dollars:
   const calculatePrice = (amount: number) => {
-    // Discount tier in USD:
-    // Under 1,000 Robux: $0.0125/Rbx
-    // 1,000 - 4,999 Robux: $0.0105/Rbx
-    // 5,000 - 19,999 Robux: $0.0098/Rbx
-    // 20,000+ Robux: $0.0089/Rbx
     let rate = 0.0125;
     if (amount >= 20000) {
       rate = 0.0089;
@@ -53,7 +48,6 @@ export const CustomRobuxModal: React.FC<CustomRobuxModalProps> = ({
   };
 
   const currentPrice = calculatePrice(customRobux);
-
   const presetChips = [500, 1500, 2500, 5000, 15000, 50000];
 
   const handleCheckout = () => {
@@ -83,20 +77,20 @@ export const CustomRobuxModal: React.FC<CustomRobuxModalProps> = ({
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           onClick={onClose}
-          className="absolute inset-0 bg-black/80 backdrop-blur-sm"
+          className="fixed inset-0 bg-black/60 backdrop-blur-xs"
         />
 
         <motion.div
-          initial={{ scale: 0.95, opacity: 0, y: 15 }}
+          initial={{ scale: 0.96, opacity: 0, y: 10 }}
           animate={{ scale: 1, opacity: 1, y: 0 }}
-          exit={{ scale: 0.95, opacity: 0, y: 15 }}
-          className="relative w-full max-w-md bg-[#181a20] border border-white/10 rounded-2xl p-5 shadow-2xl text-white z-10"
+          exit={{ scale: 0.96, opacity: 0, y: 10 }}
+          className="relative w-full max-w-md bg-white border border-[#e4e7ec] rounded-3xl p-6 shadow-2xl text-[#191b22] z-10 select-none"
         >
           {/* Header */}
-          <div className="flex items-center justify-between pb-3 border-b border-white/[0.08] mb-4">
+          <div className="flex items-center justify-between pb-3 border-b border-gray-100 mb-4">
             <div className="flex items-center gap-2">
-              <Calculator className="w-5 h-5 text-blue-400" />
-              <h3 className="font-extrabold text-base sm:text-lg text-white">
+              <Calculator className="w-5 h-5 text-[#2b5ef5]" />
+              <h3 className="font-bold text-base sm:text-lg text-[#191b22]">
                 Custom Robux Amount
               </h3>
             </div>
@@ -104,25 +98,25 @@ export const CustomRobuxModal: React.FC<CustomRobuxModalProps> = ({
               id="close-custom-modal-btn"
               type="button"
               onClick={onClose}
-              className="p-1 rounded-full text-white/60 hover:text-white hover:bg-white/10 transition-colors"
+              className="p-1 rounded-full text-[#6e7382] hover:text-black hover:bg-gray-100 transition-colors"
             >
               <X className="w-5 h-5" />
             </button>
           </div>
 
           {/* Explanation */}
-          <p className="text-xs text-white/60 mb-4 leading-relaxed">
+          <p className="text-xs text-[#6e7382] mb-4 leading-relaxed">
             Prices adapt dynamically based on your requested Robux volume. Larger quantities unlock tiered bulk discounts.
           </p>
 
           {/* Amount input */}
           <div className="mb-4">
-            <label className="text-xs font-semibold text-white/70 block mb-1.5">
+            <label className="text-xs font-semibold text-[#191b22] block mb-1.5">
               Enter Robux Amount
             </label>
             <div className="relative flex items-center">
               <div className="absolute left-3.5">
-                <RobuxIcon className="w-5 h-5 text-white" />
+                <RobuxIcon className="w-5 h-5 text-[#191b22]" />
               </div>
               <input
                 id="custom-robux-input"
@@ -132,7 +126,7 @@ export const CustomRobuxModal: React.FC<CustomRobuxModalProps> = ({
                 step="50"
                 value={customRobux}
                 onChange={(e) => setCustomRobux(Math.max(10, Number(e.target.value) || 0))}
-                className="w-full bg-[#101115] border border-white/15 rounded-xl pl-11 pr-4 py-3 text-lg font-black text-white outline-none focus:border-blue-500 transition-colors"
+                className="w-full bg-[#f8f9fa] border border-[#d6dae3] focus:border-[#2b5ef5] focus:ring-2 focus:ring-blue-500/20 rounded-xl pl-11 pr-4 py-3 text-lg font-black text-[#191b22] outline-none transition-all"
               />
             </div>
           </div>
@@ -144,10 +138,10 @@ export const CustomRobuxModal: React.FC<CustomRobuxModalProps> = ({
                 key={chip}
                 type="button"
                 onClick={() => setCustomRobux(chip)}
-                className={`px-3 py-1 text-xs font-bold rounded-lg border transition-colors ${
+                className={`px-3 py-1.5 text-xs font-bold rounded-full border transition-all cursor-pointer ${
                   customRobux === chip
-                    ? 'bg-[#0074e0] text-white border-[#0074e0]'
-                    : 'bg-[#232733] text-white/80 border-white/10 hover:bg-[#2d3240]'
+                    ? 'bg-[#e8f0fe] text-[#1a56db] border-[#2b5ef5]'
+                    : 'bg-[#f0f2f5] text-[#191b22] border-[#d6dae3] hover:bg-[#e4e7ec]'
                 }`}
               >
                 +{chip.toLocaleString()}
@@ -156,21 +150,21 @@ export const CustomRobuxModal: React.FC<CustomRobuxModalProps> = ({
           </div>
 
           {/* Price Calculation Display Card */}
-          <div className="p-4 bg-gradient-to-r from-[#1c2230] to-[#161a24] rounded-xl border border-blue-500/20 mb-5">
+          <div className="p-4 bg-[#f8f9fa] rounded-2xl border border-[#e4e7ec] mb-5 shadow-2xs">
             <div className="flex items-center justify-between mb-1">
-              <span className="text-xs text-white/60">Dynamic Calculated Price:</span>
-              <span className="text-xs font-extrabold text-blue-400 bg-blue-500/10 px-2 py-0.5 rounded">
+              <span className="text-xs text-[#6e7382]">Dynamic Calculated Price:</span>
+              <span className="text-xs font-bold text-[#1a56db] bg-blue-50 border border-blue-100 px-2 py-0.5 rounded-md">
                 {currentPrice.discount}
               </span>
             </div>
             <div className="flex items-baseline justify-between">
               <div className="flex items-center gap-1.5">
-                <RobuxIcon className="w-5 h-5 text-white" />
-                <span className="text-xl font-black text-white">
+                <RobuxIcon className="w-5 h-5 text-[#191b22]" />
+                <span className="text-xl font-black text-[#191b22]">
                   {customRobux.toLocaleString()}
                 </span>
               </div>
-              <span className="text-2xl font-black text-white">
+              <span className="text-2xl font-black text-[#191b22]">
                 {currentPrice.formatted}
               </span>
             </div>
@@ -181,18 +175,18 @@ export const CustomRobuxModal: React.FC<CustomRobuxModalProps> = ({
             id="proceed-custom-paypal-btn"
             type="button"
             onClick={handleCheckout}
-            className="w-full py-3 bg-[#0074e0] hover:bg-[#0065c7] active:scale-[0.99] transition-all text-white font-black text-sm rounded-xl flex items-center justify-center gap-2 mb-4 shadow-lg shadow-[#0074e0]/25"
+            className="w-full py-3.5 bg-[#2b5ef5] hover:bg-[#204ecc] active:scale-[0.98] transition-all text-white font-bold text-sm rounded-xl flex items-center justify-center gap-2 mb-4 shadow-sm cursor-pointer"
           >
-            <span>Checkout with PayPal</span>
+            <span>Checkout with Dollars</span>
             <ArrowRight className="w-4 h-4" />
           </button>
 
           {/* Balance Adjustment / Reset Section */}
-          <div className="pt-3 border-t border-white/[0.08]">
-            <div className="flex items-center justify-between text-xs text-white/60 mb-2">
+          <div className="pt-3 border-t border-gray-100">
+            <div className="flex items-center justify-between text-xs text-[#6e7382] mb-2">
               <span>Current Account Balance:</span>
-              <span className="font-bold text-white flex items-center gap-1">
-                <RobuxIcon className="w-3.5 h-3.5" />
+              <span className="font-bold text-[#191b22] flex items-center gap-1">
+                <RobuxIcon className="w-3.5 h-3.5 text-[#191b22]" />
                 {currentBalance.toLocaleString()}
               </span>
             </div>
@@ -203,13 +197,13 @@ export const CustomRobuxModal: React.FC<CustomRobuxModalProps> = ({
                 placeholder="Set balance directly..."
                 value={manualBalanceInput}
                 onChange={(e) => setManualBalanceInput(e.target.value)}
-                className="flex-1 bg-[#101115] border border-white/10 rounded-lg px-3 py-1.5 text-xs text-white outline-none focus:border-white/30"
+                className="flex-1 bg-[#f8f9fa] border border-[#d6dae3] focus:border-[#2b5ef5] rounded-lg px-3 py-1.5 text-xs text-[#191b22] outline-none"
               />
               <button
                 type="button"
                 onClick={handleDirectBalanceUpdate}
                 disabled={!manualBalanceInput}
-                className="px-3 py-1.5 bg-[#232733] hover:bg-[#2d3240] disabled:opacity-40 text-white text-xs font-bold rounded-lg border border-white/10 transition-colors"
+                className="px-3.5 py-1.5 bg-[#e4e7ec] hover:bg-[#d8dce4] disabled:opacity-40 text-[#191b22] text-xs font-bold rounded-lg border border-[#d6dae3] transition-colors cursor-pointer"
               >
                 Set
               </button>
@@ -219,7 +213,7 @@ export const CustomRobuxModal: React.FC<CustomRobuxModalProps> = ({
                   onSetBalanceDirectly(0);
                   onClose();
                 }}
-                className="p-1.5 bg-[#232733] hover:bg-red-500/20 text-white/70 hover:text-red-400 rounded-lg border border-white/10 transition-colors"
+                className="p-1.5 bg-[#e4e7ec] hover:bg-red-50 text-[#6e7382] hover:text-red-600 rounded-lg border border-[#d6dae3] transition-colors cursor-pointer"
                 title="Reset balance to 0"
               >
                 <RotateCcw className="w-3.5 h-3.5" />

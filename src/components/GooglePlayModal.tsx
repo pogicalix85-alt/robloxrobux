@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { X, Lock, Check, ChevronRight } from 'lucide-react';
 import { RobloxLogo } from './Icons';
-import confetti from 'canvas-confetti';
 
 export interface CheckoutItem {
   title: string;
@@ -62,22 +61,11 @@ export const GooglePlayModal: React.FC<GooglePlayModalProps> = ({
     setTimeout(() => {
       setStep('success');
 
-      try {
-        confetti({
-          particleCount: 50,
-          spread: 60,
-          origin: { y: 0.8 },
-          colors: ['#01875f', '#1a73e8', '#fbbc05', '#ffffff'],
-        });
-      } catch {
-        // Fallback
-      }
-
       setTimeout(() => {
         onSuccess(item.robux);
         onClose();
-      }, 1500);
-    }, 1600);
+      }, 1200);
+    }, 1200);
   };
 
   return (

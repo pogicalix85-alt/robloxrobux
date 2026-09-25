@@ -11,8 +11,8 @@ export const FaqSection: React.FC = () => {
   };
 
   return (
-    <section className="px-4 mb-16">
-      <h2 className="text-xl sm:text-2xl font-black text-white tracking-tight mb-3.5">
+    <section className="px-4 mb-16 select-none">
+      <h2 className="text-xl sm:text-2xl font-bold text-[#191b22] tracking-tight mb-3.5">
         FAQ
       </h2>
 
@@ -24,17 +24,17 @@ export const FaqSection: React.FC = () => {
             <div
               key={faq.id}
               id={`faq-item-${faq.id}`}
-              className="bg-[#14151b] rounded-xl overflow-hidden transition-colors border border-transparent hover:border-white/[0.04]"
+              className="bg-white rounded-xl overflow-hidden transition-colors border border-[#e4e7ec] shadow-2xs"
             >
               <button
                 type="button"
                 onClick={() => toggleFaq(faq.id)}
-                className="w-full flex items-center justify-between px-5 py-4 text-left font-bold text-sm sm:text-[15px] text-white hover:bg-white/[0.015] transition-colors cursor-pointer select-none"
+                className="w-full flex items-center justify-between px-5 py-4 text-left font-bold text-sm sm:text-[15px] text-[#191b22] hover:bg-[#f9fafb] transition-colors cursor-pointer select-none"
               >
                 <span>{faq.question}</span>
                 <ChevronDown
-                  className={`w-4 h-4 text-white/80 transition-transform duration-200 shrink-0 ml-3 ${
-                    isOpen ? 'rotate-180 text-white' : ''
+                  className={`w-4 h-4 text-[#191b22] transition-transform duration-200 shrink-0 ml-3 ${
+                    isOpen ? 'rotate-180' : ''
                   }`}
                 />
               </button>
@@ -47,7 +47,7 @@ export const FaqSection: React.FC = () => {
                     exit={{ height: 0, opacity: 0 }}
                     transition={{ duration: 0.2 }}
                   >
-                    <div className="px-5 pb-4 text-xs sm:text-sm text-white/70 leading-relaxed border-t border-white/[0.04] pt-3">
+                    <div className="px-5 pb-4 text-xs sm:text-sm text-[#4b5162] leading-relaxed border-t border-[#f0f2f5] pt-3">
                       {faq.answer}
                     </div>
                   </motion.div>

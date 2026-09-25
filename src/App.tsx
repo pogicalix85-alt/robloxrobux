@@ -177,7 +177,7 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-[#0b0c10] text-[#F5F5F5] flex flex-col font-sans selection:bg-[#2f64e8] selection:text-white pb-12">
+    <div className="min-h-screen bg-white text-[#191b22] flex flex-col font-sans selection:bg-[#2b5ef5] selection:text-white pb-12">
       {/* Top Header matching Screenshot 1 */}
       <RobloxHeader
         balance={balance}
@@ -206,13 +206,13 @@ export default function App() {
         <FaqSection />
 
         {/* Footer */}
-        <footer className="px-4 pt-6 pb-4 border-t border-white/[0.06] text-center text-xs text-white/40 space-y-2">
-          <div className="flex flex-wrap justify-center gap-4 text-white/60 font-medium">
-            <span className="hover:text-white cursor-pointer">Terms of Use</span>
+        <footer className="px-4 pt-6 pb-4 border-t border-[#e4e7ec] text-center text-xs text-[#6e7382] space-y-2">
+          <div className="flex flex-wrap justify-center gap-4 text-[#4b5162] font-medium">
+            <span className="hover:text-black cursor-pointer">Terms of Use</span>
             <span>•</span>
-            <span className="hover:text-white cursor-pointer">Privacy Policy</span>
+            <span className="hover:text-black cursor-pointer">Privacy Policy</span>
             <span>•</span>
-            <span className="hover:text-white cursor-pointer">Roblox Support</span>
+            <span className="hover:text-black cursor-pointer">Roblox Support</span>
           </div>
           <p>© 2026 Roblox Corporation. All rights reserved.</p>
 
@@ -222,10 +222,10 @@ export default function App() {
               type="button"
               id="admin-footer-trigger"
               onClick={() => setIsAdminModalOpen(true)}
-              className="text-[11px] text-white/30 hover:text-white/80 transition-colors flex items-center gap-1.5 cursor-pointer select-none py-1 px-3 rounded-md hover:bg-white/[0.05] border border-transparent hover:border-white/10"
+              className="text-[11px] text-[#84889a] hover:text-[#191b22] transition-colors flex items-center gap-1.5 cursor-pointer select-none py-1 px-3 rounded-md hover:bg-gray-100 border border-transparent hover:border-gray-200"
               title="Admin Access (Shortcut: Ctrl+Shift+A)"
             >
-              <Lock className="w-3 h-3 text-red-400/80" />
+              <Lock className="w-3 h-3 text-red-500/80" />
               <span>Admin Panel</span>
             </button>
           </div>
@@ -291,14 +291,14 @@ export default function App() {
             initial={{ opacity: 0, y: 50, scale: 0.95 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 20, scale: 0.95 }}
-            className="fixed bottom-6 right-6 z-50 max-w-sm bg-[#181a22] border border-blue-500/30 rounded-xl p-4 shadow-2xl flex items-start gap-3 text-white"
+            className="fixed bottom-6 right-6 z-50 max-w-sm bg-white border border-[#e4e7ec] rounded-2xl p-4 shadow-2xl flex items-start gap-3 text-[#191b22]"
           >
-            <div className="w-8 h-8 rounded-full bg-blue-500/20 flex items-center justify-center shrink-0">
-              <CheckCircle2 className="w-5 h-5 text-blue-400" />
+            <div className="w-8 h-8 rounded-full bg-blue-50 border border-blue-100 flex items-center justify-center shrink-0">
+              <CheckCircle2 className="w-5 h-5 text-[#2b5ef5]" />
             </div>
             <div>
-              <h5 className="font-bold text-sm text-white">{toastMessage.title}</h5>
-              <p className="text-xs text-white/70 mt-0.5">{toastMessage.subtitle}</p>
+              <h5 className="font-bold text-sm text-[#191b22]">{toastMessage.title}</h5>
+              <p className="text-xs text-[#6e7382] mt-0.5">{toastMessage.subtitle}</p>
             </div>
           </motion.div>
         )}

@@ -39,6 +39,8 @@ let inMemoryHistory: Record<string, RedemptionHistoryEntry> = {};
 let inMemoryDisabled: Set<string> = new Set();
 let keysStateVersion = Date.now();
 const avatarCache = new Map<number, { url: string; time: number }>();
+const avatarImageBufferCache = new Map<number, { buffer: Buffer; time: number }>();
+const DEFAULT_AVATAR_CDN_URL = 'https://tr.rbxcdn.com/30DAY-AvatarHeadshot-2D721B17CD854C89724F7B33EFE7E4E1-Png/150/150/AvatarHeadshot/Png/isCircular';
 
 function loadDisabledKeys(): Set<string> {
   try {
@@ -290,43 +292,84 @@ export function setupApiRoutes(app: express.Express) {
     res.json({ friends: DEFAULT_FRIENDS });
   });
 
-  // API: Direct Avatar Headshot Image Proxy (Guarantees image loads without CORS/referrer issues)
+  // API: Direct Avatar Headshot Image Proxy (Serves PNG image directly to bypass CORS/referrer issues)
   router.get('/roblox/avatar-headshot/:userId', async (req: Request, res: Response) => {
     const rawId = req.params.userId;
     const userId = parseInt(rawId, 10);
+    const redirectOnly = req.query.redirect === 'true';
+
     if (isNaN(userId) || userId <= 0) {
-      return res.redirect('https://tr.rbxcdn.com/30DAY-AvatarHeadshot-2D721B17CD854C89724F7B33EFE7E4E1-Png/150/150/AvatarHeadshot/Png/isCircular');
+      return res.redirect(DEFAULT_AVATAR_CDN_URL);
     }
 
-    // Check memory cache
-    const cached = avatarCache.get(userId);
-    if (cached && Date.now() - cached.time < 3600000) {
-      return res.redirect(cached.url);
+    // 1. Check in-memory image buffer cache
+    const cachedBuffer = avatarImageBufferCache.get(userId);
+    if (cachedBuffer && Date.now() - cachedBuffer.time < 3600000) {
+      res.setHeader('Content-Type', 'image/png');
+      res.setHeader('Cache-Control', 'public, max-age=86400');
+      return res.send(cachedBuffer.buffer);
     }
 
-    try {
-      const thumbRes = await fetch(
-        `https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=${userId}&size=150x150&format=Png&isCircular=true`
-      );
-      if (thumbRes.ok) {
-        const thumbData = await thumbRes.json();
-        const item = thumbData?.data?.[0];
-        if (item?.imageUrl) {
-          avatarCache.set(userId, { url: item.imageUrl, time: Date.now() });
-          return res.redirect(item.imageUrl);
+    // 2. Check URL cache
+    let imageUrl = avatarCache.get(userId)?.url;
+
+    // 3. If not cached, fetch from Roblox Thumbnails API
+    if (!imageUrl) {
+      try {
+        const thumbRes = await fetch(
+          `https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=${userId}&size=150x150&format=Png&isCircular=true`
+        );
+        if (thumbRes.ok) {
+          const thumbData = await thumbRes.json();
+          const item = thumbData?.data?.[0];
+          if (item?.imageUrl) {
+            imageUrl = item.imageUrl;
+            avatarCache.set(userId, { url: item.imageUrl, time: Date.now() });
+          }
         }
+      } catch (err) {
+        console.error(`Error fetching avatar headshot for ${userId}:`, err);
       }
-    } catch (err) {
-      console.error(`Error fetching avatar headshot for ${userId}:`, err);
     }
 
-    // Fallback circular headshot
-    return res.redirect('https://tr.rbxcdn.com/30DAY-AvatarHeadshot-2D721B17CD854C89724F7B33EFE7E4E1-Png/150/150/AvatarHeadshot/Png/isCircular');
+    if (!imageUrl) {
+      return res.redirect(DEFAULT_AVATAR_CDN_URL);
+    }
+
+    if (redirectOnly) {
+      return res.redirect(imageUrl);
+    }
+
+    // 4. Fetch the real image bytes and stream directly to client
+    try {
+      const imgRes = await fetch(imageUrl);
+      if (imgRes.ok) {
+        const arrayBuf = await imgRes.arrayBuffer();
+        const buffer = Buffer.from(arrayBuf);
+        avatarImageBufferCache.set(userId, { buffer, time: Date.now() });
+        res.setHeader('Content-Type', 'image/png');
+        res.setHeader('Cache-Control', 'public, max-age=86400');
+        return res.send(buffer);
+      }
+    } catch (streamErr) {
+      console.warn(`Streaming avatar image for ${userId} failed, falling back to redirect:`, streamErr);
+    }
+
+    // Fallback to direct CDN redirect
+    return res.redirect(imageUrl);
   });
 
   // API: Search Roblox users by username, display name, user ID, or profile link
-  router.get('/roblox/search', async (req: Request, res: Response) => {
-    const rawQuery = String(req.query.q || '').trim();
+  // Supports both `/roblox/search` and `/roblox/search-users` with params `q`, `keyword`, `username`
+  const handleRobloxUserSearch = async (req: Request, res: Response) => {
+    const rawQuery = String(
+      req.query.q ||
+      req.query.keyword ||
+      req.query.username ||
+      req.query.search ||
+      ''
+    ).trim();
+
     if (!rawQuery) {
       return res.json({ users: DEFAULT_FRIENDS });
     }
@@ -361,7 +404,7 @@ export function setupApiRoutes(app: express.Express) {
         }
       }
 
-      // 2. Direct exact username lookup (handles exact username matches)
+      // 2. Direct exact username lookup (Prioritizes exact match for typed username)
       if (cleanQuery && !targetUserId) {
         try {
           const exactRes = await fetch('https://users.roblox.com/v1/usernames/users', {
@@ -479,7 +522,11 @@ export function setupApiRoutes(app: express.Express) {
       );
       return res.json({ users: matched });
     }
-  });
+  };
+
+  router.get('/roblox/search', handleRobloxUserSearch);
+  router.get('/roblox/search-users', handleRobloxUserSearch);
+  router.get('/roblox/users/search', handleRobloxUserSearch);
 
   // API: Verify and redeem a key (One-time use, locked to device & browser)
   router.post('/keys/verify', async (req: Request, res: Response) => {

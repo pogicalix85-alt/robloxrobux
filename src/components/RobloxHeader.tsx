@@ -14,31 +14,35 @@ export const RobloxHeader: React.FC<RobloxHeaderProps> = ({
   onOpenCustomModal,
 }) => {
   return (
-    <header className="w-full bg-[#0b0c10] py-3 sm:py-4 select-none">
-      <div className="max-w-[840px] mx-auto px-4 flex items-center justify-end gap-2.5">
-        {/* Robux Balance Pill matching Screenshot 1 */}
-        <div
-          id="header-balance-pill"
-          onClick={onOpenCustomModal}
-          className="flex items-center gap-1.5 bg-[#1b1c24] hover:bg-[#242633] border border-white/[0.08] px-3 py-1 rounded-full cursor-pointer select-none transition-colors shadow-xs"
-          title="Click to adjust balance"
-        >
-          <RobuxIcon className="w-4 h-4 text-white" />
-          <span className="font-bold text-sm text-white">
-            {balance.toLocaleString()}
-          </span>
-        </div>
+    <header className="w-full bg-white py-3 sm:py-4 select-none">
+      <div className="max-w-[840px] mx-auto px-4 flex items-center justify-end">
+        {/* Unified Robux Balance & Send Pill matching Screenshot 1 */}
+        <div className="flex items-center bg-[#f0f2f5] border border-[#e2e5eb] rounded-full p-1 shadow-2xs">
+          {/* Balance Pill */}
+          <div
+            id="header-balance-pill"
+            onClick={onOpenCustomModal}
+            className="flex items-center gap-1.5 px-3 py-1 cursor-pointer select-none text-[#191b22] hover:text-black transition-colors"
+            title="Click to adjust Robux balance"
+          >
+            <RobuxIcon className="w-4 h-4 text-[#191b22]" />
+            <span className="font-bold text-sm text-[#191b22]">
+              {balance.toLocaleString()}
+            </span>
+          </div>
 
-        {/* Send Button Pill matching Screenshot 1 */}
-        <button
-          type="button"
-          id="header-send-btn"
-          onClick={onOpenSendModal}
-          className="flex items-center gap-1.5 bg-[#1b1c24] hover:bg-[#242633] active:scale-[0.98] text-white text-sm font-bold px-3.5 py-1 rounded-full transition-all cursor-pointer select-none border border-white/[0.08] shadow-xs"
-        >
-          <ArrowUp className="w-3.5 h-3.5 text-white stroke-[2.5]" />
-          <span>Send</span>
-        </button>
+          {/* Send Button Pill */}
+          <button
+            type="button"
+            id="header-send-btn"
+            onClick={onOpenSendModal}
+            className="flex items-center gap-1 bg-[#e4e7ec] hover:bg-[#d8dce4] active:scale-[0.98] text-[#191b22] text-xs font-bold px-3 py-1.5 rounded-full transition-all cursor-pointer select-none shadow-2xs ml-1"
+            title="Send Robux"
+          >
+            <ArrowUp className="w-3.5 h-3.5 text-[#191b22] stroke-[2.5]" />
+            <span>Send</span>
+          </button>
+        </div>
       </div>
     </header>
   );
