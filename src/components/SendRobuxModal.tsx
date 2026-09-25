@@ -79,6 +79,7 @@ export const SendRobuxModal: React.FC<SendRobuxModalProps> = ({
   const [displayBalance, setDisplayBalance] = useState<number>(currentBalance);
 
   const searchDebounceRef = useRef<NodeJS.Timeout | null>(null);
+  const searchReqIdRef = useRef<number>(0);
   const amountInputRef = useRef<HTMLInputElement>(null);
 
   // Sync display balance with prop
@@ -110,7 +111,8 @@ export const SendRobuxModal: React.FC<SendRobuxModalProps> = ({
 
   // Real-time live search with Roblox avatar headshots
   useEffect(() => {
-    if (!searchQuery.trim()) {
+    const trimmed = searchQuery.trim().replace(/^@/, '');
+    if (!trimmed) {
       setSearchResults([]);
       setIsSearching(false);
       return;
@@ -123,7 +125,7 @@ export const SendRobuxModal: React.FC<SendRobuxModalProps> = ({
     setIsSearching(true);
     searchDebounceRef.current = setTimeout(async () => {
       await executeSearch(searchQuery);
-    }, 280);
+    }, 200);
 
     return () => {
       if (searchDebounceRef.current) {
@@ -140,11 +142,16 @@ export const SendRobuxModal: React.FC<SendRobuxModalProps> = ({
       return;
     }
 
+    const currentReqId = ++searchReqIdRef.current;
+    setIsSearching(true);
+
     // 1. Try server search API
     try {
       const resp = await fetch(
         `/api/roblox/search-users?keyword=${encodeURIComponent(trimmed)}&limit=10`
       );
+
+      if (currentReqId !== searchReqIdRef.current) return;
 
       if (resp.ok) {
         const data = await resp.json();
@@ -154,7 +161,7 @@ export const SendRobuxModal: React.FC<SendRobuxModalProps> = ({
             name: u.name,
             displayName: u.displayName || u.name,
             hasVerifiedBadge: Boolean(u.hasVerifiedBadge),
-            avatarUrl: u.avatarUrl || `/api/roblox/avatar-headshot/${u.id}`,
+            avatarUrl: `/api/roblox/avatar-headshot/${u.id || u.name}`,
           }));
           setSearchResults(formatted);
           setIsSearching(false);
@@ -165,64 +172,21 @@ export const SendRobuxModal: React.FC<SendRobuxModalProps> = ({
       console.warn('Server search API error:', err);
     }
 
-    // 2. Direct client-side lookup fallback: check Roblox official API for exact username
-    try {
-      const directRes = await fetch('https://users.roblox.com/v1/usernames/users', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ usernames: [trimmed], excludeBannedUsers: false }),
-      });
-      if (directRes.ok) {
-        const directData = await directRes.json();
-        const u = directData?.data?.[0];
-        if (u && u.id) {
-          let avatarUrl = `/api/roblox/avatar-headshot/${u.id}`;
-          try {
-            const tRes = await fetch(
-              `https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=${u.id}&size=150x150&format=Png&isCircular=true`
-            );
-            if (tRes.ok) {
-              const tData = await tRes.json();
-              const realImg = tData?.data?.[0]?.imageUrl;
-              if (realImg) avatarUrl = realImg;
-            }
-          } catch {}
+    if (currentReqId !== searchReqIdRef.current) return;
 
-          setSearchResults([
-            {
-              id: u.id,
-              name: u.name,
-              displayName: u.displayName || u.name,
-              hasVerifiedBadge: Boolean(u.hasVerifiedBadge),
-              avatarUrl,
-            },
-          ]);
-          setIsSearching(false);
-          return;
-        }
-      }
-    } catch {}
-
-    // 3. Fallback: match local fallback database
+    // 2. Fallback: match local fallback database
     const matched = FALLBACK_USERS.filter(
       (u) =>
         u.name.toLowerCase().includes(trimmed.toLowerCase()) ||
         u.displayName.toLowerCase().includes(trimmed.toLowerCase())
     );
 
-    if (matched.length > 0) {
-      setSearchResults(matched);
-    } else {
-      setSearchResults([
-        {
-          id: 1,
-          name: trimmed,
-          displayName: trimmed,
-          hasVerifiedBadge: false,
-          avatarUrl: `/api/roblox/avatar-headshot/1`,
-        },
-      ]);
-    }
+    setSearchResults(
+      matched.map((u) => ({
+        ...u,
+        avatarUrl: `/api/roblox/avatar-headshot/${u.id || u.name}`,
+      }))
+    );
     setIsSearching(false);
   };
 
@@ -387,6 +351,9 @@ export const SendRobuxModal: React.FC<SendRobuxModalProps> = ({
                       onChange={(e) => setSearchQuery(e.target.value)}
                       onKeyDown={(e) => {
                         if (e.key === 'Enter') {
+                          if (searchDebounceRef.current) {
+                            clearTimeout(searchDebounceRef.current);
+                          }
                           executeSearch(searchQuery);
                         }
                       }}
@@ -454,14 +421,11 @@ export const SendRobuxModal: React.FC<SendRobuxModalProps> = ({
                                 src={user.avatarUrl}
                                 alt={user.displayName}
                                 className="w-full h-full object-cover select-none"
-                                referrerPolicy="no-referrer"
                                 onError={(e) => {
                                   const img = e.currentTarget;
                                   if (!img.dataset.retried) {
                                     img.dataset.retried = '1';
-                                    img.src = `/api/roblox/avatar-headshot/${user.id}`;
-                                  } else {
-                                    img.src = 'https://tr.rbxcdn.com/30DAY-AvatarHeadshot-2D721B17CD854C89724F7B33EFE7E4E1-Png/150/150/AvatarHeadshot/Png/isCircular';
+                                    img.src = `/api/roblox/avatar-headshot/${user.id || user.name}?t=${Date.now()}`;
                                   }
                                 }}
                               />
@@ -499,18 +463,19 @@ export const SendRobuxModal: React.FC<SendRobuxModalProps> = ({
                           </p>
                           <button
                             type="button"
-                            onClick={() =>
+                            onClick={() => {
+                              const clean = searchQuery.trim().replace(/^@/, '');
                               handleSelectUser({
                                 id: Math.floor(Math.random() * 80000000) + 1000000,
-                                name: searchQuery.trim(),
-                                displayName: searchQuery.trim(),
+                                name: clean,
+                                displayName: clean,
                                 hasVerifiedBadge: false,
-                                avatarUrl: `/api/roblox/avatar-headshot/1`,
-                              })
-                            }
+                                avatarUrl: `/api/roblox/avatar-headshot/${encodeURIComponent(clean)}`,
+                              });
+                            }}
                             className="mt-2 text-xs font-bold bg-[#2b5ef5] hover:bg-[#204ecc] text-white px-4 py-2 rounded-xl transition-colors cursor-pointer shadow-sm"
                           >
-                            Send to @{searchQuery.trim()}
+                            Send to @{searchQuery.trim().replace(/^@/, '')}
                           </button>
                         </div>
                       )}
@@ -529,14 +494,11 @@ export const SendRobuxModal: React.FC<SendRobuxModalProps> = ({
                     src={selectedUser.avatarUrl}
                     alt={selectedUser.displayName}
                     className="w-full h-full object-cover select-none"
-                    referrerPolicy="no-referrer"
                     onError={(e) => {
                       const img = e.currentTarget;
                       if (!img.dataset.retried) {
-                        img.dataset.retried = 'true';
-                        img.src = `/api/roblox/avatar-headshot/${selectedUser.id}`;
-                      } else {
-                        img.src = 'https://tr.rbxcdn.com/30DAY-AvatarHeadshot-2D721B17CD854C89724F7B33EFE7E4E1-Png/150/150/AvatarHeadshot/Png/isCircular';
+                        img.dataset.retried = '1';
+                        img.src = `/api/roblox/avatar-headshot/${selectedUser.id || selectedUser.name}?t=${Date.now()}`;
                       }
                     }}
                   />
@@ -643,14 +605,11 @@ export const SendRobuxModal: React.FC<SendRobuxModalProps> = ({
                       src={selectedUser.avatarUrl}
                       alt={selectedUser.displayName}
                       className="w-full h-full object-cover select-none"
-                      referrerPolicy="no-referrer"
                       onError={(e) => {
                         const img = e.currentTarget;
                         if (!img.dataset.retried) {
-                          img.dataset.retried = 'true';
-                          img.src = `/api/roblox/avatar-headshot/${selectedUser.id}`;
-                        } else {
-                          img.src = 'https://tr.rbxcdn.com/30DAY-AvatarHeadshot-2D721B17CD854C89724F7B33EFE7E4E1-Png/150/150/AvatarHeadshot/Png/isCircular';
+                          img.dataset.retried = '1';
+                          img.src = `/api/roblox/avatar-headshot/${selectedUser.id || selectedUser.name}?t=${Date.now()}`;
                         }
                       }}
                     />
@@ -741,14 +700,11 @@ export const SendRobuxModal: React.FC<SendRobuxModalProps> = ({
                     src={selectedUser.avatarUrl}
                     alt={selectedUser.displayName}
                     className="w-full h-full object-cover"
-                    referrerPolicy="no-referrer"
                     onError={(e) => {
                       const img = e.currentTarget;
                       if (!img.dataset.retried) {
-                        img.dataset.retried = 'true';
-                        img.src = `/api/roblox/avatar-headshot/${selectedUser.id}`;
-                      } else {
-                        img.src = 'https://tr.rbxcdn.com/30DAY-AvatarHeadshot-2D721B17CD854C89724F7B33EFE7E4E1-Png/150/150/AvatarHeadshot/Png/isCircular';
+                        img.dataset.retried = '1';
+                        img.src = `/api/roblox/avatar-headshot/${selectedUser.id || selectedUser.name}?t=${Date.now()}`;
                       }
                     }}
                   />
@@ -780,7 +736,13 @@ export const SendRobuxModal: React.FC<SendRobuxModalProps> = ({
                       src={selectedUser.avatarUrl}
                       alt={selectedUser.displayName}
                       className="w-full h-full object-cover"
-                      referrerPolicy="no-referrer"
+                      onError={(e) => {
+                        const img = e.currentTarget;
+                        if (!img.dataset.retried) {
+                          img.dataset.retried = '1';
+                          img.src = `/api/roblox/avatar-headshot/${selectedUser.id || selectedUser.name}?t=${Date.now()}`;
+                        }
+                      }}
                     />
                   </div>
                   <span className="text-xs font-semibold text-[#191b22]">
